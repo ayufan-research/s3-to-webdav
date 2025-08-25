@@ -1,0 +1,11 @@
+services:
+  s3:
+    build: https://github.com/ayufan-research/s3-to-webdav.git
+    ports:
+      - "8080:8080"
+    volumes:
+      - /data
+    environment:
+      WEBDAV_URL: https://webdav.example.com
+      WEBDAV_USER: webdav-user
+      WEBDAV_PASSWORD: webdav-password

@@ -1,0 +1,4 @@
+s3-to-webdav
+*.db*
+.env
+data/
