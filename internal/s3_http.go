@@ -59,6 +59,19 @@ type ListBucketResult struct {
 	Contents    []Object `xml:"Contents"`
 }
 
+type ListBucketResultV2 struct {
+	XMLName               xml.Name `xml:"ListBucketResult"`
+	Name                  string   `xml:"Name"`
+	Prefix                string   `xml:"Prefix"`
+	MaxKeys               int      `xml:"MaxKeys"`
+	IsTruncated           bool     `xml:"IsTruncated"`
+	KeyCount              int      `xml:"KeyCount"`
+	ContinuationToken     string   `xml:"ContinuationToken,omitempty"`
+	NextContinuationToken string   `xml:"NextContinuationToken,omitempty"`
+	StartAfter            string   `xml:"StartAfter,omitempty"`
+	Contents              []Object `xml:"Contents"`
+}
+
 type Object struct {
 	Key          string `xml:"Key"`
 	LastModified string `xml:"LastModified"`
@@ -105,10 +118,25 @@ func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
-	prefix := r.URL.Query().Get("prefix")
-	marker := r.URL.Query().Get("marker")
-
-	AddLogContext(r, fmt.Sprintf("list-objects:%s", bucket))
+	
+	// Check if this is ListObjectsV2 request
+	isV2 := r.URL.Query().Get("list-type") == "2"
+	
+	var prefix, marker string
+	if isV2 {
+		// ListObjectsV2 parameters
+		prefix = r.URL.Query().Get("prefix")
+		marker = r.URL.Query().Get("continuation-token")
+		if marker == "" {
+			marker = r.URL.Query().Get("start-after")
+		}
+		AddLogContext(r, fmt.Sprintf("list-objects-v2:%s", bucket))
+	} else {
+		// ListObjects (V1) parameters
+		prefix = r.URL.Query().Get("prefix")
+		marker = r.URL.Query().Get("marker")
+		AddLogContext(r, fmt.Sprintf("list-objects:%s", bucket))
+	}
 
 	// Default limit to 1000, but allow customization via max-keys parameter
 	limit := 1000
@@ -136,24 +164,44 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Set NextMarker if results are truncated
-	var nextMarker string
-	if truncated && len(objects) > 0 {
-		// NextMarker should be the key of the last object returned
-		nextMarker = objects[len(objects)-1].Key
-	}
-
-	result := ListBucketResult{
-		Name:        bucket,
-		Prefix:      prefix,
-		MaxKeys:     limit,
-		IsTruncated: truncated,
-		NextMarker:  nextMarker,
-		Contents:    objects,
-	}
-
 	w.Header().Set("Content-Type", "application/xml")
-	xml.NewEncoder(w).Encode(result)
+	
+	if isV2 {
+		// ListObjectsV2 response
+		var nextContinuationToken string
+		if truncated && len(objects) > 0 {
+			nextContinuationToken = objects[len(objects)-1].Key
+		}
+		
+		resultV2 := ListBucketResultV2{
+			Name:                  bucket,
+			Prefix:                prefix,
+			MaxKeys:               limit,
+			IsTruncated:           truncated,
+			KeyCount:              len(objects),
+			ContinuationToken:     r.URL.Query().Get("continuation-token"),
+			NextContinuationToken: nextContinuationToken,
+			StartAfter:            r.URL.Query().Get("start-after"),
+			Contents:              objects,
+		}
+		xml.NewEncoder(w).Encode(resultV2)
+	} else {
+		// ListObjects (V1) response
+		var nextMarker string
+		if truncated && len(objects) > 0 {
+			nextMarker = objects[len(objects)-1].Key
+		}
+		
+		result := ListBucketResult{
+			Name:        bucket,
+			Prefix:      prefix,
+			MaxKeys:     limit,
+			IsTruncated: truncated,
+			NextMarker:  nextMarker,
+			Contents:    objects,
+		}
+		xml.NewEncoder(w).Encode(result)
+	}
 }
 
 func (s *S3Server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
