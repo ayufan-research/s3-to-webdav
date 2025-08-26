@@ -6,13 +6,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"github.com/studio-b12/gowebdav"
 )
 
 // WebDAVSync handles synchronization between WebDAV server and database
 type WebDAVSync struct {
-	client *gowebdav.Client
+	client Fs
 	db     *DBCache
 
 	// Statistics
@@ -23,7 +21,7 @@ type WebDAVSync struct {
 }
 
 // NewWebDAVSync creates a new WebDAV synchronizer
-func NewWebDAVSync(client *gowebdav.Client, db *DBCache) *WebDAVSync {
+func NewWebDAVSync(client Fs, db *DBCache) *WebDAVSync {
 	return &WebDAVSync{
 		client: client,
 		db:     db,

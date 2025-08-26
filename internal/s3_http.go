@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/studio-b12/gowebdav"
 )
 
 func parseInt(s string) int {
@@ -31,7 +30,7 @@ func generateETag(path string, size int64, lastModified int64) string {
 
 type S3Server struct {
 	db        *DBCache
-	client    *gowebdav.Client
+	client    Fs
 	accessKey string
 	secretKey string
 	bucketMap map[string]interface{}
@@ -84,7 +83,7 @@ type Object struct {
 
 // Bulk delete structures
 type DeleteRequest struct {
-	XMLName xml.Name       `xml:"Delete"`
+	XMLName xml.Name         `xml:"Delete"`
 	Objects []ObjectToDelete `xml:"Object"`
 }
 
@@ -108,7 +107,7 @@ type DeleteError struct {
 	Message string `xml:"Message"`
 }
 
-func NewS3Server(db *DBCache, client *gowebdav.Client, accessKey, secretKey string) *S3Server {
+func NewS3Server(db *DBCache, client Fs, accessKey, secretKey string) *S3Server {
 	return &S3Server{
 		db:        db,
 		client:    client,

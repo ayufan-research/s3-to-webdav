@@ -208,10 +208,10 @@ func createCanonicalQueryString(values url.Values) string {
 			// AWS v4 requires specific encoding for query parameters
 			encodedKey := url.QueryEscape(key)
 			encodedKey = strings.ReplaceAll(encodedKey, "+", "%20")
-			
+
 			encodedVal := url.QueryEscape(val)
 			encodedVal = strings.ReplaceAll(encodedVal, "+", "%20")
-			
+
 			parts = append(parts, fmt.Sprintf("%s=%s", encodedKey, encodedVal))
 		}
 	}
@@ -248,7 +248,7 @@ func canonicalizeURI(path string) string {
 	if path == "" || path == "/" {
 		return "/"
 	}
-	
+
 	// Split path into segments and encode each segment
 	segments := strings.Split(path, "/")
 	for i, segment := range segments {
@@ -259,19 +259,19 @@ func canonicalizeURI(path string) string {
 			segments[i] = encoded
 		}
 	}
-	
+
 	canonicalPath := strings.Join(segments, "/")
-	
+
 	// Ensure path starts with /
 	if !strings.HasPrefix(canonicalPath, "/") {
 		canonicalPath = "/" + canonicalPath
 	}
-	
+
 	// Remove duplicate slashes but preserve trailing slash if original had it
 	for strings.Contains(canonicalPath, "//") {
 		canonicalPath = strings.ReplaceAll(canonicalPath, "//", "/")
 	}
-	
+
 	return canonicalPath
 }
 
