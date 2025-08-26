@@ -131,3 +131,68 @@ HTTPS: Server ready! Listening on https://:8080
 docker logs <container-name>
 docker-compose logs s3-to-webdav
 ```
+
+## Proxmox Backup Server Integration
+
+### Deploy with Hetzner Storage Box
+
+This uses the [Proxmox Backup Server in a Container](https://github.com/ayufan/pve-backup-server-dockerfiles).
+
+**Docker Compose:**
+
+```yaml
+services:
+  pbs:
+    image: ayufan/proxmox-ve:latest
+    ports:
+      - 8007:8007
+    mem_limit: 2G
+    volumes:
+      - ./pbs-etc:/etc/proxmox-backup
+      - ./pbs-log:/var/log/proxmox-backup
+      - ./pbs-lib:/var/lib/proxmox-backup
+      - ./pbs-backups:/backups
+    tmpfs:
+      - /run
+    restart: unless-stopped
+    stop_signal: SIGHUP
+
+  hetzner-s3:
+    build: https://github.com/ayufan-research/s3-to-webdav.git
+    restart: unless-stopped
+    volumes:
+      - ./hetzner-s3:/data
+    environment:
+      WEBDAV_URL: "https://your-username.your-server.de"
+      WEBDAV_USER: "your-username"
+      WEBDAV_PASSWORD: "your-password"
+      BUCKETS: "pbs-backups"
+```
+
+### Configure Proxmox Backup Server
+
+In PBS web interface: **Configuration → S3 Endpoints → Add**
+
+- **S3 Endpoint ID**: `hetzner-s3`
+- **Port**: `8080`
+- **Region**: not relevant
+- **Access Key ID**: *[from container logs]*
+- **Secret Access Key**: *[from container logs]*
+- **Fingerprint**: *[from container logs]*
+- **⚠️ Path Style**: ✅ **Must be enabled**
+
+Then add datastore: : **Datastore → Add Datastore**.
+
+### Get S3 Credentials and fingerprints
+
+```bash
+docker-compose logs hetzner-s3
+```
+
+## License
+
+Good for personal use.
+
+## Author
+
+Kamil Trzciński, 2025, with the help of Claude Code.
