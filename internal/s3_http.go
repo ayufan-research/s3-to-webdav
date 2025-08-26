@@ -144,6 +144,23 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	xml.NewEncoder(w).Encode(result)
 }
 
+func (s *S3Server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	bucket := vars["bucket"]
+
+	AddLogContext(r, fmt.Sprintf("head-bucket:%s", bucket))
+
+	// Check if bucket exists by trying to list objects with limit 1
+	_, _, err := s.db.ListObjects(bucket, "", "", 1)
+	if err != nil {
+		http.Error(w, "Bucket not found", http.StatusNotFound)
+		return
+	}
+
+	// Return 200 OK with no body for HEAD bucket request
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
@@ -251,6 +268,9 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 func (s *S3Server) SetupS3Routes(r *mux.Router) {
 	r.HandleFunc("/", s.handleListBuckets).Methods("GET")
 	r.HandleFunc("/{bucket}", s.handleListObjects).Methods("GET")
+	r.HandleFunc("/{bucket}/", s.handleListObjects).Methods("GET")
+	r.HandleFunc("/{bucket}", s.handleHeadBucket).Methods("HEAD")
+	r.HandleFunc("/{bucket}/", s.handleHeadBucket).Methods("HEAD")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handleGetObject).Methods("GET")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handlePutObject).Methods("PUT")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handleHeadObject).Methods("HEAD")
