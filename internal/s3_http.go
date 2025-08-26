@@ -82,6 +82,32 @@ type Object struct {
 	StorageClass string `xml:"StorageClass"`
 }
 
+// Bulk delete structures
+type DeleteRequest struct {
+	XMLName xml.Name       `xml:"Delete"`
+	Objects []ObjectToDelete `xml:"Object"`
+}
+
+type ObjectToDelete struct {
+	Key string `xml:"Key"`
+}
+
+type DeleteResult struct {
+	XMLName xml.Name        `xml:"DeleteResult"`
+	Deleted []DeletedObject `xml:"Deleted"`
+	Errors  []DeleteError   `xml:"Error"`
+}
+
+type DeletedObject struct {
+	Key string `xml:"Key"`
+}
+
+type DeleteError struct {
+	Key     string `xml:"Key"`
+	Code    string `xml:"Code"`
+	Message string `xml:"Message"`
+}
+
 func NewS3Server(db *DBCache, client *gowebdav.Client, accessKey, secretKey string) *S3Server {
 	return &S3Server{
 		db:        db,
@@ -396,6 +422,69 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleBulkDelete handles S3 bulk delete operations (POST /?delete)
+func (s *S3Server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	bucket := vars["bucket"]
+
+	AddLogContext(r, fmt.Sprintf("bulk-delete:%s", bucket))
+
+	// Validate bucket is allowed
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
+
+	// Read the delete request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	// Parse the delete request
+	var deleteRequest DeleteRequest
+	if err := xml.Unmarshal(body, &deleteRequest); err != nil {
+		http.Error(w, "Invalid delete request", http.StatusBadRequest)
+		return
+	}
+
+	// Process each object to delete
+	var deletedObjects []DeletedObject
+	var errors []DeleteError
+
+	for _, obj := range deleteRequest.Objects {
+		key := obj.Key
+		path := PathFromBucketAndKey(bucket, key)
+
+		// Remove from database
+		s.db.DeleteObject(path)
+
+		// Remove from WebDAV
+		err := s.client.Remove(path)
+		if err != nil {
+			errors = append(errors, DeleteError{
+				Key:     key,
+				Code:    "InternalError",
+				Message: "Failed to delete object",
+			})
+		} else {
+			deletedObjects = append(deletedObjects, DeletedObject{
+				Key: key,
+			})
+		}
+	}
+
+	// Build response
+	response := DeleteResult{
+		Deleted: deletedObjects,
+		Errors:  errors,
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	xml.NewEncoder(w).Encode(response)
+}
+
 // SetupS3Routes sets up all S3 API routes with the given router
 func (s *S3Server) SetupS3Routes(r *mux.Router) {
 	r.HandleFunc("/", s.handleListBuckets).Methods("GET")
@@ -403,6 +492,8 @@ func (s *S3Server) SetupS3Routes(r *mux.Router) {
 	r.HandleFunc("/{bucket}/", s.handleListObjects).Methods("GET")
 	r.HandleFunc("/{bucket}", s.handleHeadBucket).Methods("HEAD")
 	r.HandleFunc("/{bucket}/", s.handleHeadBucket).Methods("HEAD")
+	r.HandleFunc("/{bucket}/", s.handleBulkDelete).Methods("POST").Queries("delete", "")
+	r.HandleFunc("/{bucket}", s.handleBulkDelete).Methods("POST").Queries("delete", "")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handleGetObject).Methods("GET")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handlePutObject).Methods("PUT")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handleHeadObject).Methods("HEAD")
