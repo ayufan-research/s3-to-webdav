@@ -62,6 +62,7 @@ type ListBucketResult struct {
 type Object struct {
 	Key          string `xml:"Key"`
 	LastModified string `xml:"LastModified"`
+	ETag         string `xml:"ETag"`
 	Size         int64  `xml:"Size"`
 	StorageClass string `xml:"StorageClass"`
 }
@@ -125,9 +126,11 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 
 	objects := make([]Object, len(files))
 	for i, file := range files {
+		etag := generateETag(file.Path, file.Size, file.LastModified)
 		objects[i] = Object{
 			Key:          file.Key,
 			LastModified: time.Unix(file.LastModified, 0).Format(time.RFC3339),
+			ETag:         etag,
 			Size:         file.Size,
 			StorageClass: "STANDARD",
 		}
