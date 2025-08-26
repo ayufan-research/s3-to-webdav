@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -17,6 +19,13 @@ func parseInt(s string) int {
 		return val
 	}
 	return 0
+}
+
+// generateETag generates an ETag from file metadata
+func generateETag(path string, size int64, lastModified int64) string {
+	h := md5.New()
+	h.Write([]byte(fmt.Sprintf("%s-%d-%d", path, size, lastModified)))
+	return fmt.Sprintf("\"%s\"", hex.EncodeToString(h.Sum(nil)))
 }
 
 type S3Server struct {
@@ -174,8 +183,10 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", entryInfo.Size))
 	w.Header().Set("Last-Modified", time.Unix(entryInfo.LastModified, 0).Format(http.TimeFormat))
+	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -193,8 +204,10 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", entryInfo.Size))
 	w.Header().Set("Last-Modified", time.Unix(entryInfo.LastModified, 0).Format(http.TimeFormat))
+	w.Header().Set("ETag", etag)
 
 	reader, err := s.client.ReadStream(entryInfo.Path)
 	if err != nil {
@@ -231,7 +244,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.db.InsertObject(EntryInfo{
+	entryInfo := EntryInfo{
 		Path:         path,
 		Bucket:       bucket,
 		Key:          key,
@@ -239,8 +252,12 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		LastModified: stat.ModTime().Unix(),
 		IsDir:        stat.IsDir(),
 		ProcessedAt:  time.Now().Unix(),
-	})
+	}
+	
+	s.db.InsertObject(entryInfo)
 
+	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
+	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
 }
 
