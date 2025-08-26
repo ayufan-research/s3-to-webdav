@@ -184,6 +184,15 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
+	
+	// Check If-None-Match header for conditional requests
+	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
+		if ifNoneMatch == "*" || ifNoneMatch == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", entryInfo.Size))
 	w.Header().Set("Last-Modified", time.Unix(entryInfo.LastModified, 0).Format(http.TimeFormat))
 	w.Header().Set("ETag", etag)
@@ -205,6 +214,16 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
+	
+	// Check If-None-Match header for conditional requests
+	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
+		if ifNoneMatch == "*" || ifNoneMatch == etag {
+			w.Header().Set("ETag", etag)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", entryInfo.Size))
 	w.Header().Set("Last-Modified", time.Unix(entryInfo.LastModified, 0).Format(http.TimeFormat))
 	w.Header().Set("ETag", etag)
