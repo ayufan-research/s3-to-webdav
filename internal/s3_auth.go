@@ -54,6 +54,15 @@ func calculateSignature(r *http.Request, date, secretKey string) string {
 	contentMD5 := r.Header.Get("Content-MD5")
 	contentType := r.Header.Get("Content-Type")
 	canonicalizedResource := r.URL.Path
+	if canonicalizedResource == "" {
+		canonicalizedResource = "/"
+	}
+
+	// For v2, add query parameters that are part of the sub-resource
+	if query := r.URL.RawQuery; query != "" {
+		// Only include specific query parameters in v2 signature
+		canonicalizedResource += "?" + query
+	}
 
 	stringToSign := method + "\n" + contentMD5 + "\n" + contentType + "\n" + date + "\n" + canonicalizedResource
 
@@ -161,10 +170,13 @@ func createCanonicalRequest(r *http.Request, signedHeaders string) (string, erro
 	// HTTP Method
 	method := r.Method
 
-	// Canonical URI
+	// Canonical URI - must be URL-encoded per AWS v4 spec
 	canonicalURI := r.URL.Path
 	if canonicalURI == "" {
 		canonicalURI = "/"
+	} else {
+		// AWS v4 requires URI path segments to be URL-encoded
+		canonicalURI = canonicalizeURI(canonicalURI)
 	}
 
 	// Canonical Query String
@@ -193,7 +205,14 @@ func createCanonicalQueryString(values url.Values) string {
 	var parts []string
 	for key, vals := range values {
 		for _, val := range vals {
-			parts = append(parts, fmt.Sprintf("%s=%s", url.QueryEscape(key), url.QueryEscape(val)))
+			// AWS v4 requires specific encoding for query parameters
+			encodedKey := url.QueryEscape(key)
+			encodedKey = strings.ReplaceAll(encodedKey, "+", "%20")
+			
+			encodedVal := url.QueryEscape(val)
+			encodedVal = strings.ReplaceAll(encodedVal, "+", "%20")
+			
+			parts = append(parts, fmt.Sprintf("%s=%s", encodedKey, encodedVal))
 		}
 	}
 	sort.Strings(parts)
@@ -221,6 +240,61 @@ func createCanonicalHeaders(r *http.Request, signedHeaders string) (string, erro
 	}
 
 	return canonicalHeaders, nil
+}
+
+// canonicalizeURI encodes URI path according to AWS v4 specification
+func canonicalizeURI(path string) string {
+	// Handle empty path
+	if path == "" || path == "/" {
+		return "/"
+	}
+	
+	// Split path into segments and encode each segment
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		if segment != "" {
+			// AWS v4 URI encoding: encode everything except unreserved characters
+			// Unreserved characters: A-Z a-z 0-9 - . _ ~
+			encoded := awsURIEscape(segment)
+			segments[i] = encoded
+		}
+	}
+	
+	canonicalPath := strings.Join(segments, "/")
+	
+	// Ensure path starts with /
+	if !strings.HasPrefix(canonicalPath, "/") {
+		canonicalPath = "/" + canonicalPath
+	}
+	
+	// Remove duplicate slashes but preserve trailing slash if original had it
+	for strings.Contains(canonicalPath, "//") {
+		canonicalPath = strings.ReplaceAll(canonicalPath, "//", "/")
+	}
+	
+	return canonicalPath
+}
+
+// awsURIEscape performs AWS-compliant URI encoding
+func awsURIEscape(s string) string {
+	encoded := ""
+	for _, b := range []byte(s) {
+		c := string(b)
+		if isUnreserved(b) {
+			encoded += c
+		} else {
+			encoded += fmt.Sprintf("%%%02X", b)
+		}
+	}
+	return encoded
+}
+
+// isUnreserved checks if byte is an unreserved character per AWS v4 spec
+func isUnreserved(b byte) bool {
+	return (b >= 'A' && b <= 'Z') ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= '0' && b <= '9') ||
+		b == '-' || b == '.' || b == '_' || b == '~'
 }
 
 // hmacSHA256 performs HMAC-SHA256
