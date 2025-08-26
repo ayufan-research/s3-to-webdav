@@ -123,7 +123,6 @@ func main() {
 	}
 
 	// Get or generate S3 credentials
-	var authConfig internal.S3AuthConfig
 	if *accessInsecure {
 		if *accessKey != "" || *secretKey != "" {
 			log.Fatalf("Cannot use -aws-access-insecure with provided access or secret keys")
@@ -155,7 +154,10 @@ func main() {
 
 	// Apply authentication middleware
 	var handler http.Handler = r
-	handler = internal.S3AuthMiddleware(authConfig, handler)
+	handler = internal.S3AuthMiddleware(internal.S3AuthConfig{
+		AccessKey: *accessKey,
+		SecretKey: *secretKey,
+	}, handler)
 
 	// Wrap with access logging middleware
 	handler = internal.AccessLogMiddleware(handler)
