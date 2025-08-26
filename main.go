@@ -39,6 +39,9 @@ func main() {
 		webdavPassword = flag.String("webdav-password", os.Getenv("WEBDAV_PASSWORD"), "WebDAV password")
 		webdavInsecure = flag.Bool("webdav-insecure", getEnvOrDefault("WEBDAV_INSECURE", "false") == "true", "Allow self-signed certificates for WebDAV")
 
+		// Local filesystem configuration
+		localPath = flag.String("local-path", os.Getenv("LOCAL_PATH"), "Local filesystem path (alternative to WebDAV)")
+
 		// S3/AWS configuration
 		accessKey      = flag.String("aws-access-key", os.Getenv("AWS_ACCESS_KEY_ID"), "S3 access key")
 		secretKey      = flag.String("aws-secret-key", os.Getenv("AWS_SECRET_ACCESS_KEY"), "S3 secret key")
@@ -78,6 +81,7 @@ func main() {
 		fmt.Println("  WEBDAV_USER           - WebDAV username")
 		fmt.Println("  WEBDAV_PASSWORD       - WebDAV password")
 		fmt.Println("  WEBDAV_INSECURE       - Allow self-signed certificates for WebDAV (default: false)")
+		fmt.Println("  LOCAL_PATH            - Local filesystem path (alternative to WebDAV)")
 		fmt.Println("  AWS_ACCESS_KEY_ID     - S3 access key for authentication (optional)")
 		fmt.Println("  AWS_SECRET_ACCESS_KEY - S3 secret key for authentication (optional)")
 		fmt.Println("  AWS_ACCESS_INSECURE   - Allow insecure, secret-less access to S3 (default: false)")
@@ -91,23 +95,37 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *webdavURL == "" {
-		log.Fatal("WebDAV URL is required (use -webdav-url flag or WEBDAV_URL environment variable)")
-	}
-	if *webdavUser == "" {
-		log.Fatal("WebDAV username is required (use -webdav-user flag or WEBDAV_USER environment variable)")
-	}
-	if *webdavPassword == "" {
-		log.Fatal("WebDAV password is required (use -webdav-password flag or WEBDAV_PASSWORD environment variable)")
-	}
 	if *buckets == "" {
 		log.Fatal("Bucket list is required (use -buckets flag or BUCKETS environment variable)")
 	}
 
-	log.Printf("Starting S3-to-WebDAV bridge server...")
-	client, err := internal.NewWebDAVFs(*webdavURL, *webdavUser, *webdavPassword, *webdavInsecure)
-	if err != nil {
-		log.Fatalf("Failed to create WebDAV client: %v", err)
+	// Validate that either WebDAV or local path is configured, but not both
+	if *webdavURL != "" && *localPath != "" {
+		log.Fatal("Cannot use both WebDAV and local filesystem - choose one")
+	}
+	if *webdavURL == "" && *localPath == "" {
+		log.Fatal("Either WebDAV URL or local path is required")
+	}
+
+	// Initialize filesystem client
+	var client internal.Fs
+	var err error
+
+	if *localPath != "" {
+		log.Printf("Starting S3-to-Local bridge server...")
+		client, err = internal.NewLocalFs(*localPath)
+		if err != nil {
+			log.Fatalf("Failed to create local filesystem: %v", err)
+		}
+	} else {
+		if *webdavUser == "" || *webdavPassword == "" {
+			log.Fatal("WebDAV username and password are required")
+		}
+		log.Printf("Starting S3-to-WebDAV bridge server...")
+		client, err = internal.NewWebDAVFs(*webdavURL, *webdavUser, *webdavPassword, *webdavInsecure)
+		if err != nil {
+			log.Fatalf("Failed to create WebDAV client: %v", err)
+		}
 	}
 
 	// Parse bucket list into map
