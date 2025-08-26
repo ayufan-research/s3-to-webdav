@@ -225,29 +225,6 @@ func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]Entry
 	return files, truncated, nil
 }
 
-// ListBuckets retrieves all bucket names
-func (c *DBCache) ListBuckets() ([]string, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	rows, err := c.db.Query("SELECT DISTINCT bucket FROM entries ORDER BY bucket")
-	if err != nil {
-		return nil, fmt.Errorf("failed to query buckets: %v", err)
-	}
-	defer rows.Close()
-
-	var buckets []string
-	for rows.Next() {
-		var bucket string
-		if err := rows.Scan(&bucket); err != nil {
-			return nil, fmt.Errorf("failed to scan bucket: %v", err)
-		}
-		buckets = append(buckets, bucket)
-	}
-
-	return buckets, nil
-}
-
 // ObjectExists checks if an object exists and returns its metadata
 func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
 	c.mu.RLock()
@@ -273,21 +250,23 @@ func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
 }
 
 // GetCount returns the number of entries processed at or before the cutoff time
-func (c *DBCache) GetCount(cutoff int64) (int, error) {
+func (c *DBCache) GetCount(bucket string, cutoff int64) (int, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	var count int
-	err := c.db.QueryRow("SELECT COUNT(*) FROM entries WHERE processed_at <= ?", cutoff).Scan(&count)
+	err := c.db.QueryRow("SELECT COUNT(*) FROM entries WHERE bucket = ? AND processed_at <= ?",
+		bucket, cutoff).Scan(&count)
 	return count, err
 }
 
 // GetDirs returns a list of directories processed at or before the cutoff time
-func (c *DBCache) GetDirs(cutoff int64) ([]string, error) {
+func (c *DBCache) GetDirs(bucket string, cutoff int64) ([]string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	rows, err := c.db.Query("SELECT DISTINCT path FROM entries WHERE processed_at <= ? AND is_dir = 1 ORDER BY path", cutoff)
+	rows, err := c.db.Query("SELECT DISTINCT path FROM entries WHERE bucket = ? AND processed_at <= ? AND is_dir = 1 ORDER BY path",
+		bucket, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query unprocessed directories: %v", err)
 	}

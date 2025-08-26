@@ -31,16 +31,16 @@ func NewWebDAVSync(client *gowebdav.Client, db *DBCache) *WebDAVSync {
 }
 
 // Sync performs a sync of WebDAV content to the database
-func (ws *WebDAVSync) Sync() error {
+func (ws *WebDAVSync) Sync(bucket string) error {
 	start := time.Now()
 
-	count, err := ws.db.GetCount(time.Now().Unix())
+	count, err := ws.db.GetCount(bucket, time.Now().Unix())
 	if err != nil {
 		return err
 	}
 
 	// Get list of unprocessed directories to sync
-	queue, err := ws.db.GetDirs(0)
+	queue, err := ws.db.GetDirs(bucket, 0)
 	if err != nil {
 		return err
 	}
@@ -49,10 +49,10 @@ func (ws *WebDAVSync) Sync() error {
 		if count > 0 {
 			return nil
 		}
-		queue = []string{"/"}
-		log.Printf("Sync: Starting WebDAV sync to database...")
+		queue = append(queue, bucket)
+		log.Printf("Sync: Starting WebDAV sync for specified: %v", bucket)
 	} else {
-		log.Printf("Sync: Found %d unprocessed directories, resuming sync...", len(queue))
+		log.Printf("Sync: Found %d unprocessed directories, resuming sync... for: %v", len(queue), bucket)
 	}
 
 	const maxParallel = 10
@@ -126,6 +126,12 @@ func (ws *WebDAVSync) walkWebDAVDirectory(path string) ([]string, error) {
 			log.Printf("Sync: Failed to parse path %s: %v", fullPath, err)
 			continue
 		}
+
+		// Ignore files that appear as buckets
+		if key == "" && !info.IsDir() {
+			continue
+		}
+
 		fileInfo := EntryInfo{
 			Path:         fullPath,
 			Bucket:       bucket,

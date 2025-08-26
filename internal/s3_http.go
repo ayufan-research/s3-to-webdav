@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sort"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -33,6 +34,7 @@ type S3Server struct {
 	client    *gowebdav.Client
 	accessKey string
 	secretKey string
+	bucketMap map[string]interface{}
 }
 
 type ListBucketsResult struct {
@@ -89,14 +91,28 @@ func NewS3Server(db *DBCache, client *gowebdav.Client, accessKey, secretKey stri
 	}
 }
 
+// SetBucketMap sets the map of buckets to expose via S3 API
+func (s *S3Server) SetBucketMap(buckets map[string]interface{}) {
+	s.bucketMap = buckets
+}
+
+// isBucketAllowed checks if a bucket is allowed based on the bucket map
+func (s *S3Server) isBucketAllowed(bucket string) bool {
+	// Check if bucket is in the allowed map (O(1) lookup)
+	_, exists := s.bucketMap[bucket]
+	return exists
+}
 
 func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	AddLogContext(r, "list-buckets")
-	buckets, err := s.db.ListBuckets()
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+
+	// Use specified bucket map (buckets are required)
+	buckets := make([]string, 0, len(s.bucketMap))
+	for bucket := range s.bucketMap {
+		buckets = append(buckets, bucket)
 	}
+
+	sort.Strings(buckets)
 
 	result := ListBucketsResult{
 		Buckets: Buckets{
@@ -118,6 +134,12 @@ func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
+
+	// Validate bucket is allowed
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
 
 	// Check if this is ListObjectsV2 request
 	isV2 := r.URL.Query().Get("list-type") == "2"
@@ -210,10 +232,9 @@ func (s *S3Server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
 
 	AddLogContext(r, fmt.Sprintf("head-bucket:%s", bucket))
 
-	// Check if bucket exists by trying to list objects with limit 1
-	_, _, err := s.db.ListObjects(bucket, "", "", 1)
-	if err != nil {
-		http.Error(w, "Bucket not found", http.StatusNotFound)
+	// Validate bucket is allowed (buckets are required)
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
 		return
 	}
 
@@ -227,6 +248,12 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 
 	AddLogContext(r, fmt.Sprintf("head:%s/%s", bucket, key))
+
+	// Validate bucket is allowed
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
 
 	entryInfo, exists := s.db.ObjectExists(bucket, key)
 	if !exists || entryInfo.IsDir {
@@ -256,6 +283,12 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 
 	AddLogContext(r, fmt.Sprintf("get:%s/%s", bucket, key))
+
+	// Validate bucket is allowed
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
 
 	entryInfo, exists := s.db.ObjectExists(bucket, key)
 	if !exists || entryInfo.IsDir {
@@ -299,6 +332,12 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 
 	AddLogContext(r, fmt.Sprintf("put:%s/%s", bucket, key))
 
+	// Validate bucket is allowed
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
+
 	err := s.client.WriteStream(path, r.Body, 0644)
 	if err != nil {
 		http.Error(w, "Failed to upload object", http.StatusInternalServerError)
@@ -338,6 +377,12 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	path := PathFromBucketAndKey(bucket, key)
 
 	AddLogContext(r, fmt.Sprintf("delete:%s/%s", bucket, key))
+
+	// Validate bucket is allowed
+	if !s.isBucketAllowed(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
 
 	// Remove from database immediately
 	s.db.DeleteObject(path)

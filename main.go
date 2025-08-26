@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"path/filepath"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/studio-b12/gowebdav"
+
 	"s3-to-webdav/internal"
 )
 
@@ -19,6 +21,14 @@ func getEnvOrDefault(envKey, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func main() {
@@ -37,19 +47,22 @@ func main() {
 		accessInsecure = flag.Bool("aws-access-insecure", getEnvOrDefault("AWS_ACCESS_INSECURE", "false") == "true", "Allow insecure, secret-less access")
 
 		// Server configuration
-		httpPort       = flag.String("http-port", getEnvOrDefault("HTTP_PORT", "8080"), "HTTP server port")
-		httpOnly       = flag.Bool("http-only", getEnvOrDefault("HTTP_ONLY", "false") == "true", "Enable HTTP only (no HTTPS)")
+		httpPort = flag.String("http-port", getEnvOrDefault("HTTP_PORT", "8080"), "HTTP server port")
+		httpOnly = flag.Bool("http-only", getEnvOrDefault("HTTP_ONLY", "false") == "true", "Enable HTTP only (no HTTPS)")
 
 		// TLS configuration
-		tlsCert        = flag.String("tls-cert", os.Getenv("TLS_CERT"), "TLS certificate file path")
-		tlsKey         = flag.String("tls-key", os.Getenv("TLS_KEY"), "TLS key file path")
+		tlsCert = flag.String("tls-cert", os.Getenv("TLS_CERT"), "TLS certificate file path")
+		tlsKey  = flag.String("tls-key", os.Getenv("TLS_KEY"), "TLS key file path")
 
 		// Persistence configuration
-		dbPath         = flag.String("db-path", getEnvOrDefault("DB_PATH", "metadata.db"), "SQLite database path")
-		persistDir     = flag.String("persist-dir", getEnvOrDefault("PERSIST_DIR", "./data"), "Directory to store persistent data (certificates and keys)")
+		dbPath     = flag.String("db-path", getEnvOrDefault("DB_PATH", "metadata.db"), "SQLite database path")
+		persistDir = flag.String("persist-dir", getEnvOrDefault("PERSIST_DIR", "./data"), "Directory to store persistent data (certificates and keys)")
+
+		// Bucket configuration
+		buckets = flag.String("buckets", os.Getenv("BUCKETS"), "Comma-separated list of bucket names to sync (required)")
 
 		// Help
-		help           = flag.Bool("help", false, "Show help message")
+		help = flag.Bool("help", false, "Show help message")
 	)
 
 	flag.Parse()
@@ -76,6 +89,7 @@ func main() {
 		fmt.Println("  TLS_CERT              - TLS certificate file path (optional)")
 		fmt.Println("  TLS_KEY               - TLS key file path (optional)")
 		fmt.Println("  PERSIST_DIR           - Directory for persistent data (certificates and keys) (default: ./data)")
+		fmt.Println("  BUCKETS               - Comma-separated list of bucket names to sync (required)")
 		os.Exit(0)
 	}
 
@@ -87,6 +101,9 @@ func main() {
 	}
 	if *webdavPassword == "" {
 		log.Fatal("WebDAV password is required (use -webdav-password flag or WEBDAV_PASSWORD environment variable)")
+	}
+	if *buckets == "" {
+		log.Fatal("Bucket list is required (use -buckets flag or BUCKETS environment variable)")
 	}
 
 	log.Printf("Starting S3-to-WebDAV bridge server...")
@@ -110,6 +127,15 @@ func main() {
 	}
 	log.Printf("WebDAV: Successfully connected to WebDAV server")
 
+	// Parse bucket list into map
+	bucketMap := make(map[string]interface{})
+	for _, bucket := range strings.Split(*buckets, ",") {
+		if bucket = strings.TrimSpace(bucket); bucket != "" {
+			bucketMap[bucket] = struct{}{}
+		}
+	}
+	log.Printf("Buckets: %v", getMapKeys(bucketMap))
+
 	// Create database cache
 	db, err := internal.NewDBCache(*dbPath)
 	if err != nil {
@@ -118,8 +144,10 @@ func main() {
 
 	// Perform initial sync
 	sync := internal.NewWebDAVSync(client, db)
-	if err := sync.Sync(); err != nil {
-		log.Fatalf("Failed to perform initial sync: %v", err)
+	for bucket := range bucketMap {
+		if err := sync.Sync(bucket); err != nil {
+			log.Fatalf("Failed to perform initial sync for bucket %s: %v", bucket, err)
+		}
 	}
 
 	// Get or generate S3 credentials
@@ -146,6 +174,7 @@ func main() {
 	}
 
 	s3Server := internal.NewS3Server(db, client, *accessKey, *secretKey)
+	s3Server.SetBucketMap(bucketMap)
 
 	r := mux.NewRouter()
 

@@ -8,9 +8,11 @@ A simple S3-compatible API server that uses WebDAV as the underlying storage bac
 
 ## How It Works
 
-The server connects to your WebDAV server, scans all files into a SQLite database for fast lookups, and provides an S3-compatible HTTP API. When you upload/download files through the S3 API, they are stored on/retrieved from the WebDAV server. The database cache is kept in sync automatically.
+The server connects to your WebDAV server, scans specified bucket directories into a SQLite database for fast lookups, and provides an S3-compatible HTTP API. When you upload/download files through the S3 API, they are stored on/retrieved from the WebDAV server. The database cache is kept in sync automatically.
 
-This server is to be used with Proxmox Backup Server and connecting it to Hetzner Storage Box WebDAV.
+**Bucket Filtering**: You must specify which WebDAV directories to expose as S3 buckets. Only the specified buckets will be synced and accessible via the S3 API.
+
+This server is designed for use with Proxmox Backup Server and connecting it to Hetzner Storage Box WebDAV.
 
 ## Configuration
 
@@ -22,6 +24,7 @@ Configure via environment variables or command-line flags:
 WEBDAV_URL="https://your-webdav-server.com/dav"
 WEBDAV_USER="your-username"
 WEBDAV_PASSWORD="your-password"
+BUCKETS="bucket1,bucket2,bucket3"    # Comma-separated list of bucket names to sync
 ```
 
 ### Optional Settings
@@ -54,7 +57,8 @@ PERSIST_DIR="./data"          # Directory for persistent data (certificates and 
 ```bash
 ./s3-to-webdav -webdav-url "https://your-server.com/dav" \
                -webdav-user "user" \
-               -webdav-password "pass"
+               -webdav-password "pass" \
+               -buckets "bucket1,bucket2,bucket3"
 ```
 
 ## Usage with S3 Tools
@@ -86,6 +90,7 @@ docker run -v /path/to/data:/data \
            -e WEBDAV_URL="https://your-server.com/dav" \
            -e WEBDAV_USER="user" \
            -e WEBDAV_PASSWORD="pass" \
+           -e BUCKETS="bucket1,bucket2,bucket3" \
            -p 8080:8080 s3-to-webdav
 ```
 
@@ -94,7 +99,7 @@ docker run -v /path/to/data:/data \
 Use the included `docker-compose.yml` file:
 
 ```bash
-# Edit docker-compose.yml with your WebDAV credentials
+# Edit docker-compose.yml with your WebDAV credentials and bucket list
 docker-compose up -d
 
 # View logs to see generated credentials
