@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// WebDAVSync handles synchronization between WebDAV server and database
-type WebDAVSync struct {
+// DBSync handles synchronization between WebDAV server and database
+type DBSync struct {
 	client Fs
 	db     *DBCache
 
@@ -20,16 +20,16 @@ type WebDAVSync struct {
 	lastStatus  time.Time
 }
 
-// NewWebDAVSync creates a new WebDAV synchronizer
-func NewWebDAVSync(client Fs, db *DBCache) *WebDAVSync {
-	return &WebDAVSync{
+// NewDBSync creates a new WebDAV synchronizer
+func NewDBSync(client Fs, db *DBCache) *DBSync {
+	return &DBSync{
 		client: client,
 		db:     db,
 	}
 }
 
 // Sync performs a sync of WebDAV content to the database
-func (ws *WebDAVSync) Sync(bucket string) error {
+func (ws *DBSync) Sync(bucket string) error {
 	start := time.Now()
 
 	count, err := ws.db.GetCount(bucket, time.Now().Unix())
@@ -105,7 +105,7 @@ func (ws *WebDAVSync) Sync(bucket string) error {
 }
 
 // walkWebDAVDirectory recursively walks WebDAV directories and sends objects to channels
-func (ws *WebDAVSync) walkWebDAVDirectory(path string) ([]string, error) {
+func (ws *DBSync) walkWebDAVDirectory(path string) ([]string, error) {
 	infos, err := ws.client.ReadDir(path)
 	if err != nil {
 		log.Printf("Sync: Failed to read directory %s: %v", path, err)
@@ -165,7 +165,7 @@ func (ws *WebDAVSync) walkWebDAVDirectory(path string) ([]string, error) {
 	return dirs, err
 }
 
-func (ws *WebDAVSync) printStats(queue int) {
+func (ws *DBSync) printStats(queue int) {
 	if time.Since(ws.lastStatus) < time.Second {
 		return
 	}

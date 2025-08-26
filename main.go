@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -11,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/studio-b12/gowebdav"
 
 	"s3-to-webdav/internal"
 )
@@ -107,25 +105,10 @@ func main() {
 	}
 
 	log.Printf("Starting S3-to-WebDAV bridge server...")
-
-	// Create WebDAV client
-	log.Printf("WebDAV: URL: %s", *webdavURL)
-	log.Printf("WebDAV: User: %s", *webdavUser)
-
-	client := gowebdav.NewClient(*webdavURL, *webdavUser, *webdavPassword)
-
-	// Configure TLS settings if needed
-	if *webdavInsecure {
-		log.Printf("WebDAV: Allowing self-signed certificates")
-		client.SetTransport(&http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		})
+	client, err := internal.NewWebDAVFs(*webdavURL, *webdavUser, *webdavPassword, *webdavInsecure)
+	if err != nil {
+		log.Fatalf("Failed to create WebDAV client: %v", err)
 	}
-
-	if err := client.Connect(); err != nil {
-		log.Fatalf("Failed to connect to WebDAV: %v", err)
-	}
-	log.Printf("WebDAV: Successfully connected to WebDAV server")
 
 	// Parse bucket list into map
 	bucketMap := make(map[string]interface{})
@@ -143,7 +126,7 @@ func main() {
 	}
 
 	// Perform initial sync
-	sync := internal.NewWebDAVSync(client, db)
+	sync := internal.NewDBSync(client, db)
 	for bucket := range bucketMap {
 		if err := sync.Sync(bucket); err != nil {
 			log.Fatalf("Failed to perform initial sync for bucket %s: %v", bucket, err)
