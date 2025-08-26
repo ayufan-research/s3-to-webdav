@@ -118,10 +118,10 @@ func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
-	
+
 	// Check if this is ListObjectsV2 request
 	isV2 := r.URL.Query().Get("list-type") == "2"
-	
+
 	var prefix, marker string
 	if isV2 {
 		// ListObjectsV2 parameters
@@ -165,14 +165,14 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
-	
+
 	if isV2 {
 		// ListObjectsV2 response
 		var nextContinuationToken string
 		if truncated && len(objects) > 0 {
 			nextContinuationToken = objects[len(objects)-1].Key
 		}
-		
+
 		resultV2 := ListBucketResultV2{
 			Name:                  bucket,
 			Prefix:                prefix,
@@ -191,7 +191,7 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		if truncated && len(objects) > 0 {
 			nextMarker = objects[len(objects)-1].Key
 		}
-		
+
 		result := ListBucketResult{
 			Name:        bucket,
 			Prefix:      prefix,
@@ -235,7 +235,7 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
-	
+
 	// Check If-None-Match header for conditional requests
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
 		if ifNoneMatch == "*" || ifNoneMatch == etag {
@@ -265,7 +265,7 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
-	
+
 	// Check If-None-Match header for conditional requests
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
 		if ifNoneMatch == "*" || ifNoneMatch == etag {
@@ -323,7 +323,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		IsDir:        stat.IsDir(),
 		ProcessedAt:  time.Now().Unix(),
 	}
-	
+
 	s.db.InsertObject(entryInfo)
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
