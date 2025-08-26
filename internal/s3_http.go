@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"

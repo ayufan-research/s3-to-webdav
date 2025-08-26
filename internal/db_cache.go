@@ -3,8 +3,8 @@ package internal
 import (
 	"database/sql"
 	"fmt"
-	"time"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -88,7 +88,6 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-
 // InsertObject inserts a single object into the database
 func (c *DBCache) InsertObject(fileInfo EntryInfo) error {
 	c.mu.Lock()
@@ -161,7 +160,6 @@ func (c *DBCache) ClearAllObjects() error {
 	_, err := c.db.Exec("DELETE FROM entries")
 	return err
 }
-
 
 // ListObjects retrieves objects from a bucket with optional prefix and marker
 // Returns objects up to the specified limit, ordered by path
@@ -292,4 +290,3 @@ func (c *DBCache) MarkAsProcessed(path string) error {
 	_, err := c.db.Exec("UPDATE entries SET processed_at = ? WHERE path = ?", time.Now().Unix(), path)
 	return err
 }
-

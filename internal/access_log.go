@@ -37,7 +37,7 @@ func AccessLogMiddleware(next http.Handler) http.Handler {
 		wrapped := &responseWriter{
 			ResponseWriter: w,
 			statusCode:     200, // Default status code
-			size:          0,
+			size:           0,
 		}
 
 		// Call the next handler
@@ -112,7 +112,7 @@ func logApacheFormat(r *http.Request, statusCode int, responseSize int64, durati
 		referer,
 		userAgent,
 		duration.Microseconds(), // Response time in microseconds
-		contextInfo, // Additional context
+		contextInfo,             // Additional context
 	)
 
 	// Write to stdout

@@ -75,7 +75,7 @@ func (ws *WebDAVSync) Sync(bucket string) error {
 	pending := 0
 
 	for len(queue) > 0 || pending > 0 {
-		check_pending:
+	check_pending:
 		for len(queue) > 0 {
 			dir := queue[len(queue)-1]
 			select {

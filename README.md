@@ -43,8 +43,12 @@ PERSIST_DIR="./data"          # Directory for persistent data (certificates and 
 
 ### Authentication
 
-- **Secure Mode (default)**: S3 keys are auto-generated and stored in `PERSIST_DIR`, or use provided `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Requests must include proper AWS v2 signature authentication.
+- **Secure Mode (default)**: S3 keys are auto-generated and stored in `PERSIST_DIR`, or use provided `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Requests must include proper AWS signature authentication (supports both v2 and v4 signatures).
 - **Insecure Mode**: Set `AWS_ACCESS_INSECURE=true` to disable authentication entirely (not recommended).
+
+**Signature Support**: The server supports both AWS Signature Version 2 and Version 4 authentication:
+- **AWS v2**: Traditional `Authorization: AWS AccessKey:Signature` headers and presigned URLs
+- **AWS v4**: Modern `Authorization: AWS4-HMAC-SHA256 ...` headers and presigned URLs with `X-Amz-*` parameters
 
 ### TLS Options
 
