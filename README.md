@@ -43,7 +43,6 @@ WEBDAV_INSECURE="false"        # Allow self-signed WebDAV certificates
 AWS_ACCESS_KEY_ID="key"        # S3 access key (optional - auto-generated if not provided)
 AWS_SECRET_ACCESS_KEY="secret" # S3 secret key (optional - auto-generated if not provided)
 AWS_ACCESS_INSECURE="false"    # Allow insecure access without authentication
-DB_PATH="metadata.db"          # SQLite database file path
 TLS_CERT="cert.pem"           # Custom TLS certificate
 TLS_KEY="key.pem"             # Custom TLS private key
 PERSIST_DIR="./data"          # Directory for persistent data (certificates and S3 keys)

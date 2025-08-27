@@ -91,8 +91,7 @@ func main() {
 		tlsKey  = flag.String("tls-key", os.Getenv("TLS_KEY"), "TLS key file path")
 
 		// Persistence configuration
-		dbPath     = flag.String("db-path", getEnvOrDefault("DB_PATH", "metadata.db"), "SQLite database path")
-		persistDir = flag.String("persist-dir", getEnvOrDefault("PERSIST_DIR", "./data"), "Directory to store persistent data (certificates and keys)")
+		persistDir = flag.String("persist-dir", getEnvOrDefault("PERSIST_DIR", "./data"), "Directory to store persistent data")
 
 		// Bucket configuration
 		buckets = flag.String("buckets", os.Getenv("BUCKETS"), "Comma-separated list of bucket names to sync (required)")
@@ -125,7 +124,6 @@ func main() {
 		fmt.Println("  AWS_ACCESS_INSECURE   - Allow insecure, secret-less access to S3 (default: false)")
 		fmt.Println("  HTTP_PORT             - Server port (default: 8080)")
 		fmt.Println("  HTTP_ONLY             - Enable HTTP only (no HTTPS) (default: false)")
-		fmt.Println("  DB_PATH               - SQLite database path (default: metadata.db)")
 		fmt.Println("  TLS_CERT              - TLS certificate file path (optional)")
 		fmt.Println("  TLS_KEY               - TLS key file path (optional)")
 		fmt.Println("  PERSIST_DIR           - Directory for persistent data (certificates and keys) (default: ./data)")
@@ -135,6 +133,9 @@ func main() {
 
 	if *buckets == "" {
 		log.Fatal("Bucket list is required (use -buckets flag or BUCKETS environment variable)")
+	}
+	if *persistDir == "" {
+		log.Fatal("Persist directory is required (use -persist-dir flag or PERSIST_DIR environment variable)")
 	}
 
 	// Validate that either WebDAV or local path is configured, but not both
@@ -176,7 +177,7 @@ func main() {
 	log.Printf("Buckets: %v", getMapKeys(bucketMap))
 
 	// Create database cache
-	db, err := internal.NewDBCache(*dbPath)
+	db, err := internal.NewDBCache(filepath.Join(*persistDir, "metadata.db"))
 	if err != nil {
 		log.Fatalf("Failed to initialize database cache: %v", err)
 	}

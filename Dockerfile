@@ -17,7 +17,6 @@ EXPOSE 8080
 
 # Persist data
 VOLUME ["/data"]
-ENV DB_PATH="/data/metadata.db" \
-  PERSIST_DIR="/data"
+ENV PERSIST_DIR="/data"
 
 ENTRYPOINT ["/s3-to-webdav"]
