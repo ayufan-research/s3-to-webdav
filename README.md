@@ -4,17 +4,25 @@ A simple S3-compatible API server that uses WebDAV as the underlying storage bac
 
 ## ⚠️ Security Notice
 
-**This server is NOT intended for internet exposure without proper TLS.** It implements AWS v2 signature authentication and should be used on trusted networks or with HTTPS enabled.
+**This server is NOT intended for internet exposure. It cannot handle such load.** It implements AWS v2 signature authentication and should be used on trusted networks or with HTTPS enabled. The intent usage is to run it locally to PBS, and use it only with PBS.
+
+## Buy me a Coffee
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Y8Y8GCP24)
+
+If you found it useful :)
 
 ## How It Works
 
-The server connects to your WebDAV server, scans specified bucket directories into a SQLite database for fast lookups, and provides an S3-compatible HTTP API. When you upload/download files through the S3 API, they are stored on/retrieved from the WebDAV server. The database cache is kept in sync automatically.
+The server connects to the WebDAV server, scans specified bucket directories into a SQLite database for fast lookups, and provides an S3-compatible HTTP API. When you upload/download files through the S3 API, they are stored on/retrieved from the WebDAV server. The database cache is kept in sync automatically.
 
-**Bucket Filtering**: You must specify which WebDAV directories to expose as S3 buckets. Only the specified buckets will be synced and accessible via the S3 API.
+The initial sync for buckets might take significant amount of time. No data will be served once the buckets are scanned. The database might become out of sync if files are manually created on bucket, in such case the `metadata.db` has to be removed.
 
-This server is designed for use with Proxmox Backup Server and connecting it to Hetzner Storage Box WebDAV.
+This server is designed for use with Proxmox Backup Server and connecting it to Hetzner Storage Box WebDAV, and supports limited amount of features to make it work with PBS.
 
 ## Configuration
+
+**Bucket Filtering**: You must specify which WebDAV directories to expose as S3 buckets. Only the specified buckets will be synced and accessible via the S3 API.
 
 Configure via environment variables or command-line flags:
 
