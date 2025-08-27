@@ -53,7 +53,7 @@ func (ws *DBSync) Sync(bucket string) error {
 		log.Printf("Sync: Found %d unprocessed directories, resuming sync... for: %v", len(queue), bucket)
 	}
 
-	const maxParallel = 10
+	const maxParallel = 2
 
 	send := make(chan string)
 	recv := make(chan []string)

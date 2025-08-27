@@ -1,6 +1,8 @@
-# S3-to-WebDAV Bridge
+# S3-to-WebDAV Bridge (BETA)
 
 A simple S3-compatible API server that uses WebDAV as the underlying storage backend.
+
+**This project is BETA, and might contain bugs, use it with caution.**
 
 ## ⚠️ Security Notice
 
