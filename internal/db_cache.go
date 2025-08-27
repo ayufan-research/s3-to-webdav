@@ -115,6 +115,15 @@ func (c *DBCache) DeleteObject(path string) error {
 	return err
 }
 
+func (c *DBCache) DeleteOld(bucket string, cutoff int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Delete old entries
+	_, err := c.db.Exec("DELETE FROM entries WHERE bucket = ? AND processed_at < ?", bucket, cutoff)
+	return err
+}
+
 // BatchInsertObjects inserts multiple objects in a single transaction
 func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
 	if len(objects) == 0 {
@@ -223,8 +232,7 @@ func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]Entry
 	return files, truncated, nil
 }
 
-// ObjectExists checks if an object exists and returns its metadata
-func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
+func (c *DBCache) findObject(where string, args ...any) (EntryInfo, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -234,7 +242,7 @@ func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
 
 	err := c.db.QueryRow(`
 		SELECT path, bucket, key, size, last_modified, is_dir, processed_at 
-		FROM entries WHERE bucket = ? AND key = ?`, bucket, key).Scan(
+		FROM entries WHERE `+where, args...).Scan(
 		&fileInfo.Path, &fileInfo.Bucket, &fileInfo.Key, &fileInfo.Size, &lastModified, &isDir, &processedAt)
 
 	if err != nil {
@@ -245,6 +253,16 @@ func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
 	fileInfo.ProcessedAt = processedAt
 	fileInfo.IsDir = isDir == 1
 	return fileInfo, true
+}
+
+// PathExists checks if an object exists and returns its metadata
+func (c *DBCache) PathExists(path string) (EntryInfo, bool) {
+	return c.findObject("path = ?", path)
+}
+
+// ObjectExists checks if an object exists and returns its metadata
+func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
+	return c.findObject("bucket = ? AND key = ?", bucket, key)
 }
 
 // GetCount returns the number of entries processed at or before the cutoff time

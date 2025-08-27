@@ -40,7 +40,7 @@ BUCKETS="bucket1,bucket2,bucket3"    # Comma-separated list of bucket names to s
 ### Optional Settings
 
 ```bash
-HTTP_PORT="8080"                    # HTTP server port
+HTTP_PORT="8080"               # HTTPS server port
 WEBDAV_INSECURE="false"        # Allow self-signed WebDAV certificates
 AWS_ACCESS_KEY_ID="key"        # S3 access key (optional - auto-generated if not provided)
 AWS_SECRET_ACCESS_KEY="secret" # S3 secret key (optional - auto-generated if not provided)
