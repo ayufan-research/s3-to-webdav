@@ -11,7 +11,7 @@ type EntryInfo struct {
 	Size         int64
 	LastModified int64
 	IsDir        bool
-	ProcessedAt  int64
+	Processed    bool
 }
 
 // BucketAndKeyFromPath extracts bucketi and key from path

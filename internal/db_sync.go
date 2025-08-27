@@ -1,13 +1,11 @@
 package internal
 
 import (
-	"io/ioutil"
+	"fmt"
 	"log"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
@@ -18,10 +16,7 @@ type DBSync struct {
 	persistDir string
 
 	// Statistics
-	totalSize   int64
-	objectCount int64
-	dirCount    int64
-	lastStatus  time.Time
+	lastStatus time.Time
 }
 
 // NewDBSync creates a new WebDAV synchronizer
@@ -33,128 +28,122 @@ func NewDBSync(client Fs, db *DBCache, persistDir string) *DBSync {
 	}
 }
 
-func (ws *DBSync) SyncTime(bucket string, reset bool) (int64, error) {
-	syncPath := filepath.Join(ws.persistDir, "sync."+bucket)
-
-	if !reset {
-		data, err := ioutil.ReadFile(syncPath)
-		if err == nil {
-			return strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
-		} else if !os.IsNotExist(err) {
-			return 0, err
-		}
-	}
-
-	syncTime := time.Now().Unix()
-
-	err := ioutil.WriteFile(syncPath, []byte(strconv.FormatInt(syncTime, 10)), 0644)
-	if err != nil {
-		return 0, err
-	}
-
-	return syncTime, nil
-}
-
 // Sync performs a sync of WebDAV content to the database
 func (ws *DBSync) Sync(bucket string) error {
 	start := time.Now()
 
-	syncTime, err := ws.SyncTime(bucket, false)
-	if err != nil {
-		return err
-	}
-
-	count, err := ws.db.GetCount(bucket, time.Now().Unix())
-	if err != nil {
-		return err
-	}
-
-	// Get list of unprocessed directories to sync
-	queue, err := ws.db.GetDirs(bucket, syncTime)
-	if err != nil {
-		return err
-	}
-
-	if len(queue) == 0 {
-		if count > 0 {
-			return nil
+	// Ensure root directory entry exists
+	if entry, err := ws.db.Stat(bucket); err != nil || !entry.IsDir {
+		err := ws.db.InsertObject(EntryInfo{
+			Path:         bucket,
+			Bucket:       bucket,
+			Key:          "",
+			Size:         0,
+			LastModified: time.Now().Unix(),
+			IsDir:        true,
+			Processed:    false,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create root directory entry for %s: %v", bucket, err)
 		}
-		queue = append(queue, bucket)
-		log.Printf("Sync: Starting WebDAV sync for specified: %v", bucket)
+		log.Printf("Sync: Created root directory entry for %s", bucket)
+	}
+
+	if processedCount, unprocessedCount, _, err := ws.db.GetStats(bucket); err != nil {
+		return err
+	} else if unprocessedCount == 0 {
+		log.Printf("Sync: No unprocessed entries for %s, skipping sync", bucket)
+		return nil
 	} else {
-		log.Printf("Sync: Found %d unprocessed directories, resuming sync... for: %v", len(queue), bucket)
+		log.Printf("Sync: %d processed and %d unprocessed entries for %s, starting sync",
+			processedCount, unprocessedCount, bucket)
 	}
 
 	const maxParallel = 2
 
-	send := make(chan string)
-	recv := make(chan []string)
+	send := make(chan EntryInfo)
+	recv := make(chan error)
+	wg := sync.WaitGroup{}
+	wg.Add(maxParallel)
 
 	for i := 0; i < maxParallel; i++ {
 		go func() {
+			defer wg.Done()
 			for dir := range send {
-				dirs, err := ws.walkWebDAVDirectory(dir, syncTime)
+				err := ws.walkDir(dir.Path)
 				if err != nil {
 					log.Printf("Sync: Error walking directory %s: %v", dir, err)
 				}
-				recv <- dirs
+				recv <- err
 			}
 		}()
 	}
 
 	pending := 0
 
-	for len(queue) > 0 || pending > 0 {
-	check_pending:
+	for {
+		queue, err := ws.db.ListUnprocessedDirs(bucket, 50)
+		if err != nil {
+			log.Printf("Sync: Failed to list unprocessed directories: %v", err)
+			break
+		}
+		if len(queue) == 0 && pending == 0 {
+			break
+		}
+
 		for len(queue) > 0 {
 			dir := queue[len(queue)-1]
 			select {
 			case send <- dir:
 				queue = queue[:len(queue)-1]
 				pending++
-			default:
-				break check_pending
+			case <-recv:
+				pending--
 			}
+			ws.printStats(bucket)
 		}
 
 		if pending > 0 {
 			select {
-			case dirs := <-recv:
-				if dirs != nil {
-					queue = append(queue, dirs...)
-					ws.printStats(len(queue))
-				}
+			case <-recv:
 				pending--
 			}
 		}
 	}
 
-	if err := ws.db.DeleteOld(bucket, syncTime); err != nil {
+	close(send)
+	wg.Wait()
+	close(recv)
+
+	if deleted, err := ws.db.DeleteUnprocessed(bucket); err != nil {
 		log.Printf("Sync: Failed to delete old entries for bucket %s: %v", bucket, err)
+	} else if deleted > 0 {
+		log.Printf("Sync: Deleted %d old unprocessed entries for bucket %s", deleted, bucket)
+	}
+
+	if processedCount, _, totalSize, err := ws.db.GetStats(bucket); err == nil {
+		log.Printf("Sync: Loaded %d objects (%.2f MB total) into database",
+			processedCount, float64(totalSize)/1024/1024)
 	}
 
 	log.Printf("Sync: WebDAV sync completed in %v", time.Since(start))
-	log.Printf("Sync: Loaded %d directories and %d objects (%.2f MB total) into database",
-		ws.dirCount, ws.objectCount, float64(ws.totalSize)/1024/1024)
-
 	return nil
 }
 
-// walkWebDAVDirectory recursively walks WebDAV directories and sends objects to channels
-func (ws *DBSync) walkWebDAVDirectory(path string, cutoff int64) ([]string, error) {
+func (ws *DBSync) walkDir(path string) error {
 	// Ignore recently processed
-	if entryInfo, ok := ws.db.PathExists(path); ok && entryInfo.IsDir && entryInfo.ProcessedAt > cutoff {
-		return nil, nil
+	if entryInfo, err := ws.db.Stat(path); err == nil && (!entryInfo.IsDir || entryInfo.Processed) {
+		return nil
 	}
 
+	// Read directory
 	infos, err := ws.client.ReadDir(path)
 	if err != nil {
 		log.Printf("Sync: Failed to read directory %s: %v", path, err)
-		return nil, err
+		return err
 	}
 
 	batchInfos := make([]EntryInfo, 0, len(infos))
-	dirs := []string{}
 
 	for _, info := range infos {
 		fullPath := filepath.Join(path, info.Name())
@@ -166,11 +155,6 @@ func (ws *DBSync) walkWebDAVDirectory(path string, cutoff int64) ([]string, erro
 			continue
 		}
 
-		// Ignore files that appear as buckets
-		if key == "" && !info.IsDir() {
-			continue
-		}
-
 		fileInfo := EntryInfo{
 			Path:         fullPath,
 			Bucket:       bucket,
@@ -178,41 +162,35 @@ func (ws *DBSync) walkWebDAVDirectory(path string, cutoff int64) ([]string, erro
 			Size:         info.Size(),
 			LastModified: info.ModTime().Unix(),
 			IsDir:        info.IsDir(),
-		}
-		if !info.IsDir() {
-			fileInfo.ProcessedAt = time.Now().Unix()
+			Processed:    !info.IsDir(),
 		}
 		batchInfos = append(batchInfos, fileInfo)
-
-		if info.IsDir() {
-			atomic.AddInt64(&ws.dirCount, 1)
-			dirs = append(dirs, fullPath)
-		} else {
-			atomic.AddInt64(&ws.objectCount, 1)
-			atomic.AddInt64(&ws.totalSize, info.Size())
-		}
 	}
 
 	err = ws.db.BatchInsertObjects(batchInfos)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = ws.db.MarkAsProcessed(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return dirs, err
+	return nil
 }
 
-func (ws *DBSync) printStats(queue int) {
+func (ws *DBSync) printStats(bucket string) {
 	if time.Since(ws.lastStatus) < time.Second {
 		return
 	}
 	ws.lastStatus = time.Now()
 
-	log.Printf("Sync: Processed %d objects and %d directories (%.2f MB total) so far... (%d in queue)",
-		atomic.LoadInt64(&ws.objectCount), atomic.LoadInt64(&ws.dirCount), float64(atomic.LoadInt64(&ws.totalSize))/1024/1024,
-		queue)
+	processedCount, unprocessedCount, totalSize, err := ws.db.GetStats(bucket)
+	if err != nil {
+		return
+	}
+
+	log.Printf("Sync: Processed %d objects, %d in queue (%.2f MB total) so far...",
+		processedCount, unprocessedCount, float64(totalSize)/1024/1024)
 }

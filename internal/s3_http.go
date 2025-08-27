@@ -276,8 +276,8 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryInfo, exists := s.db.ObjectExists(bucket, key)
-	if !exists || entryInfo.IsDir {
+	entryInfo, err := s.db.StatObject(bucket, key)
+	if err != nil || entryInfo.IsDir {
 		http.Error(w, "Object not found", http.StatusNotFound)
 		return
 	}
@@ -311,8 +311,8 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryInfo, exists := s.db.ObjectExists(bucket, key)
-	if !exists || entryInfo.IsDir {
+	entryInfo, err := s.db.StatObject(bucket, key)
+	if err != nil || entryInfo.IsDir {
 		http.Error(w, "Object not found", http.StatusNotFound)
 		AddLogContext(r, "local-fail")
 		return
@@ -386,7 +386,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		Size:         stat.Size(),
 		LastModified: stat.ModTime().Unix(),
 		IsDir:        stat.IsDir(),
-		ProcessedAt:  time.Now().Unix(),
+		Processed:    true,
 	}
 
 	s.db.InsertObject(entryInfo)

@@ -213,7 +213,7 @@ func runScan(client internal.Fs, db *internal.DBCache, bucketMap map[string]inte
 	if *rescan {
 		// Reset marker files
 		for bucket := range bucketMap {
-			if _, err := sync.SyncTime(bucket, true); err != nil {
+			if err := db.ResetProcessedFlags(bucket); err != nil {
 				log.Fatalf("Failed to perform rescan: %v", err)
 			}
 		}
@@ -296,7 +296,7 @@ func main() {
 	log.Printf("Buckets: %v", getMapKeys(bucketMap))
 
 	// Create database cache
-	db, err := internal.NewDBCache(filepath.Join(*persistDir, "metadata.db"))
+	db, err := internal.NewDBCache(filepath.Join(*persistDir, "metadata2.db"))
 	if err != nil {
 		log.Fatalf("Failed to initialize database cache: %v", err)
 	}

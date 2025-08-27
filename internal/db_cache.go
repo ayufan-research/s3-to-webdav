@@ -69,7 +69,7 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 		last_modified INTEGER NOT NULL,
 		is_dir INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
-		processed_at INTEGER NOT NULL
+		processed INTEGER NOT NULL
 	);
 
 	-- Indexes for performance
@@ -79,7 +79,7 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	CREATE INDEX IF NOT EXISTS idx_entries_bucket_prefix ON entries(bucket, key COLLATE NOCASE);
 	CREATE INDEX IF NOT EXISTS idx_entries_is_dir ON entries(is_dir);
 	CREATE INDEX IF NOT EXISTS idx_entries_updated_at ON entries(updated_at);
-	CREATE INDEX IF NOT EXISTS idx_entries_processed_at ON entries(processed_at);
+	CREATE INDEX IF NOT EXISTS idx_entries_processed ON entries(processed);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -97,30 +97,11 @@ func (c *DBCache) InsertObject(fileInfo EntryInfo) error {
 
 	// Insert entry
 	_, err := c.db.Exec(`
-		INSERT OR REPLACE INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed_at)
+		INSERT OR REPLACE INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		fileInfo.Path, fileInfo.Bucket, fileInfo.Key, fileInfo.Size, fileInfo.LastModified,
-		map[bool]int{false: 0, true: 1}[fileInfo.IsDir], now, fileInfo.ProcessedAt)
+		map[bool]int{false: 0, true: 1}[fileInfo.IsDir], now, map[bool]int{false: 0, true: 1}[fileInfo.Processed])
 
-	return err
-}
-
-// DeleteObject removes an object from the database
-func (c *DBCache) DeleteObject(path string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Delete entry
-	_, err := c.db.Exec("DELETE FROM entries WHERE path = ?", path)
-	return err
-}
-
-func (c *DBCache) DeleteOld(bucket string, cutoff int64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Delete old entries
-	_, err := c.db.Exec("DELETE FROM entries WHERE bucket = ? AND processed_at < ?", bucket, cutoff)
 	return err
 }
 
@@ -140,8 +121,13 @@ func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			bucket = excluded.bucket, key = excluded.key, size = excluded.size,
+			last_modified = excluded.last_modified, is_dir = excluded.is_dir, updated_at = excluded.updated_at,
+			processed = excluded.processed or entries.processed;
+	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %v", err)
 	}
@@ -151,7 +137,7 @@ func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
 
 	for _, obj := range objects {
 		_, err := stmt.Exec(obj.Path, obj.Bucket, obj.Key, obj.Size,
-			obj.LastModified, map[bool]int{false: 0, true: 1}[obj.IsDir], now, obj.ProcessedAt)
+			obj.LastModified, map[bool]int{false: 0, true: 1}[obj.IsDir], now, map[bool]int{false: 0, true: 1}[obj.Processed])
 		if err != nil {
 			return fmt.Errorf("failed to insert object %s: %v", obj.Path, err)
 		}
@@ -160,26 +146,67 @@ func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
 	return tx.Commit()
 }
 
-// ClearAllObjects removes all objects from the database
-func (c *DBCache) ClearAllObjects() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *DBCache) scanEntry(scanner func(dest ...any) error) (EntryInfo, error) {
+	var path, bucket, key string
+	var size, lastModified int64
+	var isDir, processed int
 
-	// Clear entries table
-	_, err := c.db.Exec("DELETE FROM entries")
-	return err
+	if err := scanner(&path, &bucket, &key, &size, &lastModified, &isDir, &processed); err != nil {
+		return EntryInfo{}, fmt.Errorf("failed to scan row: %v", err)
+	}
+
+	return EntryInfo{
+		Path:         path,
+		Bucket:       bucket,
+		Key:          key,
+		Size:         size,
+		LastModified: lastModified,
+		IsDir:        isDir == 1,
+		Processed:    processed == 1,
+	}, nil
+}
+
+func (c *DBCache) findObject(where string, args ...any) (EntryInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	row := c.db.QueryRow(`
+		SELECT path, bucket, key, size, last_modified, is_dir, processed 
+		FROM entries WHERE `+where, args...)
+	return c.scanEntry(row.Scan)
+}
+
+func (c *DBCache) findObjects(where string, args ...any) ([]EntryInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	rows, err := c.db.Query(`
+		SELECT path, bucket, key, size, last_modified, is_dir, processed 
+		FROM entries WHERE `+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query objects: %v", err)
+	}
+	defer rows.Close()
+
+	var entries []EntryInfo
+	for rows.Next() {
+		entry, err := c.scanEntry(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
 }
 
 // ListObjects retrieves objects from a bucket with optional prefix and marker
 // Returns objects up to the specified limit, ordered by path
 // Also returns whether results were truncated
 func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]EntryInfo, bool, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	// Base query
-	query := "SELECT path, bucket, key, size, last_modified, is_dir, processed_at FROM entries"
-	query += " WHERE bucket = ? AND is_dir = 0"
+	query := "bucket = ? AND is_dir = 0"
 	args := []interface{}{bucket}
 
 	if prefix != "" {
@@ -195,31 +222,9 @@ func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]Entry
 	query += " ORDER BY path LIMIT ?"
 	args = append(args, limit+1)
 
-	rows, err := c.db.Query(query, args...)
+	files, err := c.findObjects(query, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to query objects: %v", err)
-	}
-	defer rows.Close()
-
-	var files []EntryInfo
-	for rows.Next() {
-		var path, bucket, key string
-		var size, lastModified, processedAt int64
-		var isDir int
-
-		if err := rows.Scan(&path, &bucket, &key, &size, &lastModified, &isDir, &processedAt); err != nil {
-			return nil, false, fmt.Errorf("failed to scan row: %v", err)
-		}
-
-		files = append(files, EntryInfo{
-			Path:         path,
-			Bucket:       bucket,
-			Key:          key,
-			Size:         size,
-			LastModified: lastModified,
-			IsDir:        isDir == 1,
-			ProcessedAt:  processedAt,
-		})
 	}
 
 	// Determine if results were truncated
@@ -232,72 +237,56 @@ func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]Entry
 	return files, truncated, nil
 }
 
-func (c *DBCache) findObject(where string, args ...any) (EntryInfo, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	var fileInfo EntryInfo
-	var lastModified, processedAt int64
-	var isDir int
-
-	err := c.db.QueryRow(`
-		SELECT path, bucket, key, size, last_modified, is_dir, processed_at 
-		FROM entries WHERE `+where, args...).Scan(
-		&fileInfo.Path, &fileInfo.Bucket, &fileInfo.Key, &fileInfo.Size, &lastModified, &isDir, &processedAt)
-
-	if err != nil {
-		return EntryInfo{}, false
-	}
-
-	fileInfo.LastModified = lastModified
-	fileInfo.ProcessedAt = processedAt
-	fileInfo.IsDir = isDir == 1
-	return fileInfo, true
+// ListUnprocessedDirs returns a list of unprocessed directory entries up to the specified limit
+func (c *DBCache) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, error) {
+	return c.findObjects("bucket = ? AND processed = 0 AND is_dir = 1 ORDER BY path LIMIT ?", bucket, limit)
 }
 
-// PathExists checks if an object exists and returns its metadata
-func (c *DBCache) PathExists(path string) (EntryInfo, bool) {
+// Stat checks if an object exists and returns its metadata
+func (c *DBCache) Stat(path string) (EntryInfo, error) {
 	return c.findObject("path = ?", path)
 }
 
-// ObjectExists checks if an object exists and returns its metadata
-func (c *DBCache) ObjectExists(bucket, key string) (EntryInfo, bool) {
+// StatObject checks if an object exists and returns its metadata
+func (c *DBCache) StatObject(bucket, key string) (EntryInfo, error) {
 	return c.findObject("bucket = ? AND key = ?", bucket, key)
 }
 
-// GetCount returns the number of entries processed at or before the cutoff time
-func (c *DBCache) GetCount(bucket string, cutoff int64) (int, error) {
+// GetStats returns the number of processed and unprocessed entries
+func (c *DBCache) GetStats(bucket string) (processed int, unprocessed int, totalSize int64, err error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var count int
-	err := c.db.QueryRow("SELECT COUNT(*) FROM entries WHERE bucket = ? AND processed_at <= ?",
-		bucket, cutoff).Scan(&count)
-	return count, err
+	err = c.db.QueryRow("SELECT SUM(processed==1), SUM(processed==0), SUM(size) FROM entries WHERE bucket = ?",
+		bucket).Scan(&processed, &unprocessed, &totalSize)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return processed, unprocessed, totalSize, err
 }
 
-// GetDirs returns a list of directories processed at or before the cutoff time
-func (c *DBCache) GetDirs(bucket string, cutoff int64) ([]string, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+// DeleteObject removes an object from the database
+func (c *DBCache) DeleteObject(path string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	rows, err := c.db.Query("SELECT DISTINCT path FROM entries WHERE bucket = ? AND processed_at <= ? AND is_dir = 1 ORDER BY path",
-		bucket, cutoff)
+	// Delete entry
+	_, err := c.db.Exec("DELETE FROM entries WHERE path = ?", path)
+	return err
+}
+
+func (c *DBCache) DeleteUnprocessed(bucket string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Delete old entries
+	result, err := c.db.Exec("DELETE FROM entries WHERE bucket = ? AND processed = 0", bucket)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query unprocessed directories: %v", err)
+		return 0, err
 	}
-	defer rows.Close()
-
-	var dirs []string
-	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			return nil, fmt.Errorf("failed to scan directory: %v", err)
-		}
-		dirs = append(dirs, path)
-	}
-
-	return dirs, nil
+	
+	rowsAffected, err := result.RowsAffected()
+	return rowsAffected, err
 }
 
 // MarkAsProcessed marks a single entry as processed
@@ -305,6 +294,15 @@ func (c *DBCache) MarkAsProcessed(path string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	_, err := c.db.Exec("UPDATE entries SET processed_at = ? WHERE path = ?", time.Now().Unix(), path)
+	_, err := c.db.Exec("UPDATE entries SET processed = 1, updated_at = ? WHERE path = ?", time.Now().Unix(), path)
+	return err
+}
+
+// ResetProcessedFlags marks all existing entries as unprocessed for resync
+func (c *DBCache) ResetProcessedFlags(bucket string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, err := c.db.Exec("UPDATE entries SET processed = 0 WHERE bucket = ?", bucket)
 	return err
 }
