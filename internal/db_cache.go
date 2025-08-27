@@ -75,11 +75,8 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	-- Indexes for performance
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_path ON entries(path);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_bucket_key ON entries(bucket, key);
-	CREATE INDEX IF NOT EXISTS idx_entries_bucket ON entries(bucket);
-	CREATE INDEX IF NOT EXISTS idx_entries_bucket_prefix ON entries(bucket, key COLLATE NOCASE);
-	CREATE INDEX IF NOT EXISTS idx_entries_is_dir ON entries(is_dir);
-	CREATE INDEX IF NOT EXISTS idx_entries_updated_at ON entries(updated_at);
-	CREATE INDEX IF NOT EXISTS idx_entries_processed ON entries(processed);
+	CREATE INDEX IF NOT EXISTS idx_entries_bucket_processed_isdir ON entries(bucket, processed, is_dir);
+	CREATE INDEX IF NOT EXISTS idx_entries_bucket_isdir_key ON entries(bucket, is_dir, key);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
