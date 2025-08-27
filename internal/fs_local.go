@@ -80,7 +80,7 @@ func (fs *localFs) ReadStream(path string) (io.ReadCloser, error) {
 	return os.Open(fullPath)
 }
 
-func (fs *localFs) WriteStream(path string, stream io.Reader, mode os.FileMode) error {
+func (fs *localFs) WriteStream(path string, stream io.Reader, contentLength int64, mode os.FileMode) error {
 	fullPath, err := fs.getFullPath(path)
 	if err != nil {
 		return err

@@ -363,7 +363,12 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.client.WriteStream(path, r.Body, 0644)
+	if r.ContentLength < 0 {
+		http.Error(w, "Invalid content length", http.StatusBadRequest)
+		return
+	}
+
+	err := s.client.WriteStream(path, r.Body, r.ContentLength, 0644)
 	if err != nil {
 		http.Error(w, "Failed to upload object", http.StatusInternalServerError)
 		AddLogContext(r, "remote-fail")

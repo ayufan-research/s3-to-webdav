@@ -2,11 +2,17 @@ package internal
 
 import (
 	"crypto/tls"
+	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/studio-b12/gowebdav"
 )
+
+type webdavFs struct {
+	client *gowebdav.Client
+}
 
 func NewWebDAVFs(webdavURL, webdavUser, webdavPassword string, webdavInsecure bool) (Fs, error) {
 	// Create WebDAV client
@@ -28,5 +34,25 @@ func NewWebDAVFs(webdavURL, webdavUser, webdavPassword string, webdavInsecure bo
 	}
 	log.Printf("WebDAV: Successfully connected to WebDAV server")
 
-	return client, nil
+	return &webdavFs{client: client}, nil
+}
+
+func (fs *webdavFs) ReadDir(path string) ([]os.FileInfo, error) {
+	return fs.client.ReadDir(path)
+}
+
+func (fs *webdavFs) Stat(path string) (os.FileInfo, error) {
+	return fs.client.Stat(path)
+}
+
+func (fs *webdavFs) ReadStream(path string) (io.ReadCloser, error) {
+	return fs.client.ReadStream(path)
+}
+
+func (fs *webdavFs) WriteStream(path string, stream io.Reader, contentLength int64, mode os.FileMode) error {
+	return fs.client.WriteStreamWithLength(path, stream, contentLength, mode)
+}
+
+func (fs *webdavFs) Remove(path string) error {
+	return fs.client.Remove(path)
 }
