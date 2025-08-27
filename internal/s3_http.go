@@ -355,7 +355,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 	path := PathFromBucketAndKey(bucket, key)
 
-	AddLogContext(r, fmt.Sprintf("put:%s/%s", bucket, key))
+	AddLogContext(r, fmt.Sprintf("put:%s/%s/%d", bucket, key, r.ContentLength))
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {

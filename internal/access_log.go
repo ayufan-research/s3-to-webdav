@@ -52,11 +52,18 @@ func AccessLogMiddleware(next http.Handler) http.Handler {
 }
 
 func logApacheFormat(r *http.Request, statusCode int, responseSize int64, duration time.Duration) {
-	// Apache Common Log Format:
-	// remote_host - remote_user [timestamp] "request_line" status_code response_size "referer" "user_agent"
+	// Extended Apache Common Log Format:
+	// remote_host - remote_user [timestamp] "request_line" status_code request_size/response_size "referer" "user_agent" duration_ms
 
 	// Extract client IP
 	remoteHost := getClientIP(r)
+
+	// Get request content length
+	requestContentLength := r.ContentLength
+	requestSizeStr := "-"
+	if requestContentLength >= 0 {
+		requestSizeStr = strconv.FormatInt(requestContentLength, 10)
+	}
 
 	// Remote user (not available in basic setup, use -)
 	remoteUser := "-"
@@ -80,7 +87,7 @@ func logApacheFormat(r *http.Request, statusCode int, responseSize int64, durati
 
 	// Response size (use - if 0)
 	sizeStr := "-"
-	if responseSize > 0 {
+	if responseSize >= 0 {
 		sizeStr = strconv.FormatInt(responseSize, 10)
 	}
 
@@ -101,18 +108,19 @@ func logApacheFormat(r *http.Request, statusCode int, responseSize int64, durati
 		contextInfo = fmt.Sprintf(" [%s]", strings.Join(logInfos, ", "))
 	}
 
-	// Apache Combined Log Format with response time and context
-	logLine := fmt.Sprintf("%s - %s [%s] \"%s\" %d %s \"%s\" \"%s\" %d%s\n",
+	// Apache Combined Log Format with response time, request size, and context
+	logLine := fmt.Sprintf("%s - %s [%s] \"%s\" %d %s/%s \"%s\" \"%s\" %d%s\n",
 		remoteHost,
 		remoteUser,
 		timestamp,
 		requestLine,
 		statusCode,
+		requestSizeStr,
 		sizeStr,
 		referer,
 		userAgent,
-		duration.Microseconds(), // Response time in microseconds
-		contextInfo,             // Additional context
+		duration.Milliseconds(),
+		contextInfo,
 	)
 
 	// Write to stdout
