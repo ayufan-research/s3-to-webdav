@@ -389,7 +389,8 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		Processed:    true,
 	}
 
-	s.db.InsertObjects(entryInfo)
+	entryInfos := append(BaseDirEntries(path), entryInfo)
+	s.db.InsertObjects(entryInfos...)
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
 	w.Header().Set("ETag", etag)

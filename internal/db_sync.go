@@ -149,9 +149,9 @@ func (ws *DBSync) walkDir(path string) error {
 		fullPath := filepath.Join(path, info.Name())
 		fullPath = strings.ReplaceAll(fullPath, "\\", "/")
 
-		bucket, key, err := BucketAndKeyFromPath(fullPath)
-		if err != nil {
-			log.Printf("Sync: Failed to parse path %s: %v", fullPath, err)
+		bucket, key, ok := BucketAndKeyFromPath(fullPath)
+		if !ok {
+			log.Printf("Sync: Failed to parse path %s", fullPath)
 			continue
 		}
 
