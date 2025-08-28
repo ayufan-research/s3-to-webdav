@@ -265,7 +265,7 @@ func (c *DBCache) DeleteUnprocessed(bucket string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	rowsAffected, err := result.RowsAffected()
 	return rowsAffected, err
 }

@@ -1,8 +1,8 @@
 package internal
 
 import (
-	"strings"
 	"path/filepath"
+	"strings"
 )
 
 type EntryInfo struct {

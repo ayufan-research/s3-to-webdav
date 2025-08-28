@@ -72,7 +72,7 @@ func (ws *DBSync) Sync(bucket string) error {
 			for dir := range send {
 				err := ws.walkDir(dir.Path)
 				if err != nil {
-					log.Printf("Sync: Error walking directory %s: %v", dir, err)
+					log.Printf("Sync: Error walking directory %s: %v", dir.Path, err)
 				}
 				recv <- err
 			}

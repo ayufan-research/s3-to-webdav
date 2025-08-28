@@ -90,7 +90,7 @@ func cleanEmptyDirectories(client internal.Fs, currentPath string) error {
 		if entry.IsDir() {
 			err = cleanEmptyDirectories(client, filepath.Join(currentPath, entry.Name()))
 			if err != nil {
-				log.Printf("Clean: %w", err)
+				log.Printf("Clean: %v", err)
 			}
 		}
 	}
