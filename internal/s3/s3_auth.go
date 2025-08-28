@@ -1,4 +1,4 @@
-package internal
+package s3
 
 import (
 	"crypto/hmac"
@@ -17,14 +17,14 @@ import (
 	"s3-to-webdav/internal/access_log"
 )
 
-// S3AuthConfig holds the configuration for S3 authentication
-type S3AuthConfig struct {
+// AuthConfig holds the configuration for S3 authentication
+type AuthConfig struct {
 	AccessKey string
 	SecretKey string
 }
 
-// S3AuthMiddleware provides AWS-style authentication including presigned URLs
-func S3AuthMiddleware(config S3AuthConfig, next http.Handler) http.Handler {
+// AuthMiddleware provides AWS-style authentication including presigned URLs
+func AuthMiddleware(config AuthConfig, next http.Handler) http.Handler {
 	// Skip authentication if no access key is configured
 	if config.AccessKey == "" {
 		return next
@@ -74,7 +74,7 @@ func calculateSignature(r *http.Request, date, secretKey string) string {
 }
 
 // validateAuthorizationV2 validates AWS-style Authorization header including parsing and signature validation
-func validateAuthorizationV2(r *http.Request, config S3AuthConfig) bool {
+func validateAuthorizationV2(r *http.Request, config AuthConfig) bool {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		return false
@@ -98,7 +98,7 @@ func validateAuthorizationV2(r *http.Request, config S3AuthConfig) bool {
 }
 
 // validatePresignedURLV2 validates AWS-style presigned URL signatures
-func validatePresignedURLV2(r *http.Request, config S3AuthConfig) bool {
+func validatePresignedURLV2(r *http.Request, config AuthConfig) bool {
 	query := r.URL.Query()
 
 	// Check for required presigned URL parameters
@@ -307,7 +307,7 @@ func hmacSHA256(key []byte, data string) []byte {
 }
 
 // validateAuthorizationV4 validates AWS v4 Authorization header
-func validateAuthorizationV4(r *http.Request, config S3AuthConfig) bool {
+func validateAuthorizationV4(r *http.Request, config AuthConfig) bool {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "AWS4-HMAC-SHA256 ") {
 		return false
@@ -363,7 +363,7 @@ func validateAuthorizationV4(r *http.Request, config S3AuthConfig) bool {
 }
 
 // validatePresignedURLV4 validates AWS v4 presigned URLs
-func validatePresignedURLV4(r *http.Request, config S3AuthConfig) bool {
+func validatePresignedURLV4(r *http.Request, config AuthConfig) bool {
 	query := r.URL.Query()
 
 	// Check for v4 presigned URL parameters

@@ -1,4 +1,4 @@
-package internal
+package s3
 
 import (
 	"crypto/md5"
@@ -32,7 +32,7 @@ func generateETag(path string, size int64, lastModified int64) string {
 	return fmt.Sprintf("\"%s\"", hex.EncodeToString(h.Sum(nil)))
 }
 
-type S3Server struct {
+type server struct {
 	db        cache.Cache
 	client    fs.Fs
 	bucketMap map[string]interface{}
@@ -109,26 +109,26 @@ type DeleteError struct {
 	Message string `xml:"Message"`
 }
 
-func NewS3Server(db cache.Cache, client fs.Fs) *S3Server {
-	return &S3Server{
+func NewServer(db cache.Cache, client fs.Fs) *server {
+	return &server{
 		db:     db,
 		client: client,
 	}
 }
 
 // SetBucketMap sets the map of buckets to expose via S3 API
-func (s *S3Server) SetBucketMap(buckets map[string]interface{}) {
+func (s *server) SetBucketMap(buckets map[string]interface{}) {
 	s.bucketMap = buckets
 }
 
 // isBucketAllowed checks if a bucket is allowed based on the bucket map
-func (s *S3Server) isBucketAllowed(bucket string) bool {
+func (s *server) isBucketAllowed(bucket string) bool {
 	// Check if bucket is in the allowed map (O(1) lookup)
 	_, exists := s.bucketMap[bucket]
 	return exists
 }
 
-func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	access_log.AddLogContext(r, "list-buckets")
 
 	// Use specified bucket map (buckets are required)
@@ -156,7 +156,7 @@ func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	xml.NewEncoder(w).Encode(result)
 }
 
-func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
@@ -251,7 +251,7 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *S3Server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
@@ -267,7 +267,7 @@ func (s *S3Server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 	key := vars["key"]
@@ -302,7 +302,7 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 	key := vars["key"]
@@ -349,7 +349,7 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, reader)
 }
 
-func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
+func (s *server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 	key := vars["key"]
@@ -401,7 +401,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 	key := vars["key"]
@@ -428,7 +428,7 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleBulkDelete handles S3 bulk delete operations (POST /?delete)
-func (s *S3Server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
@@ -491,7 +491,7 @@ func (s *S3Server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetupS3Routes sets up all S3 API routes with the given router
-func (s *S3Server) SetupS3Routes(r *mux.Router) {
+func (s *server) SetupS3Routes(r *mux.Router) {
 	r.HandleFunc("/", s.handleListBuckets).Methods("GET")
 	r.HandleFunc("/{bucket}", s.handleListObjects).Methods("GET")
 	r.HandleFunc("/{bucket}/", s.handleListObjects).Methods("GET")

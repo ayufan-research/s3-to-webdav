@@ -15,6 +15,7 @@ import (
 	"s3-to-webdav/internal/access_log"
 	"s3-to-webdav/internal/cache"
 	"s3-to-webdav/internal/fs"
+	"s3-to-webdav/internal/s3"
 )
 
 var (
@@ -96,20 +97,20 @@ func usage() {
 	os.Exit(0)
 }
 
-func loadAccessKeys() internal.S3AuthConfig {
+func loadAccessKeys() s3.AuthConfig {
 	// Get or generate S3 credentials
 	if *accessInsecure {
 		if *accessKey != "" || *secretKey != "" {
 			log.Fatalf("Cannot use -aws-access-insecure with provided access or secret keys")
 		}
 		log.Printf("S3: Authentication disabled")
-		return internal.S3AuthConfig{}
+		return s3.AuthConfig{}
 	}
 
 	if *accessKey != "" && *secretKey != "" {
 		log.Printf("S3: Using provided credentials")
 		log.Printf("S3: Access Key: %s", *accessKey)
-		return internal.S3AuthConfig{
+		return s3.AuthConfig{
 			AccessKey: *accessKey,
 			SecretKey: *secretKey,
 		}
@@ -126,7 +127,7 @@ func loadAccessKeys() internal.S3AuthConfig {
 	}
 	log.Printf("S3: Access Key: %s", accessKey)
 	log.Printf("S3: Secret Key: %s", secretKey)
-	return internal.S3AuthConfig{
+	return s3.AuthConfig{
 		AccessKey: accessKey,
 		SecretKey: secretKey,
 	}
@@ -146,7 +147,7 @@ func loadCerts() (string, string) {
 }
 
 func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
-	s3Server := internal.NewS3Server(db, client)
+	s3Server := s3.NewServer(db, client)
 	s3Server.SetBucketMap(bucketMap)
 
 	// Setup S3 API routes
@@ -154,7 +155,7 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 	s3Server.SetupS3Routes(r)
 
 	// Apply authentication middleware
-	handler := internal.S3AuthMiddleware(loadAccessKeys(), r)
+	handler := s3.AuthMiddleware(loadAccessKeys(), r)
 
 	// Wrap with access logging middleware
 	handler = access_log.AccessLogMiddleware(handler)
