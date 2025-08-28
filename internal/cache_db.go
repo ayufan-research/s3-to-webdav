@@ -7,6 +7,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"s3-to-webdav/internal/fs"
 )
 
 // cacheDB handles all database operations for the S3-to-WebDAV server
@@ -86,7 +88,7 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 }
 
 // InsertObjects inserts multiple objects in a single transaction
-func (c *cacheDB) InsertObjects(objects ...EntryInfo) error {
+func (c *cacheDB) InsertObjects(objects ...fs.EntryInfo) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -127,16 +129,16 @@ func (c *cacheDB) InsertObjects(objects ...EntryInfo) error {
 	return tx.Commit()
 }
 
-func (c *cacheDB) scanEntry(scanner func(dest ...any) error) (EntryInfo, error) {
+func (c *cacheDB) scanEntry(scanner func(dest ...any) error) (fs.EntryInfo, error) {
 	var path, bucket, key string
 	var size, lastModified int64
 	var isDir, processed int
 
 	if err := scanner(&path, &bucket, &key, &size, &lastModified, &isDir, &processed); err != nil {
-		return EntryInfo{}, fmt.Errorf("failed to scan row: %v", err)
+		return fs.EntryInfo{}, fmt.Errorf("failed to scan row: %v", err)
 	}
 
-	return EntryInfo{
+	return fs.EntryInfo{
 		Path:         path,
 		Bucket:       bucket,
 		Key:          key,
@@ -147,7 +149,7 @@ func (c *cacheDB) scanEntry(scanner func(dest ...any) error) (EntryInfo, error) 
 	}, nil
 }
 
-func (c *cacheDB) findObject(where string, args ...any) (EntryInfo, error) {
+func (c *cacheDB) findObject(where string, args ...any) (fs.EntryInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -157,7 +159,7 @@ func (c *cacheDB) findObject(where string, args ...any) (EntryInfo, error) {
 	return c.scanEntry(row.Scan)
 }
 
-func (c *cacheDB) findObjects(where string, args ...any) ([]EntryInfo, error) {
+func (c *cacheDB) findObjects(where string, args ...any) ([]fs.EntryInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -169,7 +171,7 @@ func (c *cacheDB) findObjects(where string, args ...any) ([]EntryInfo, error) {
 	}
 	defer rows.Close()
 
-	var entries []EntryInfo
+	var entries []fs.EntryInfo
 	for rows.Next() {
 		entry, err := c.scanEntry(rows.Scan)
 		if err != nil {
@@ -185,7 +187,7 @@ func (c *cacheDB) findObjects(where string, args ...any) ([]EntryInfo, error) {
 // ListObjects retrieves objects from a bucket with optional prefix and marker
 // Returns objects up to the specified limit, ordered by path
 // Also returns whether results were truncated
-func (c *cacheDB) ListObjects(bucket, prefix, marker string, limit int) ([]EntryInfo, bool, error) {
+func (c *cacheDB) ListObjects(bucket, prefix, marker string, limit int) ([]fs.EntryInfo, bool, error) {
 	// Base query
 	query := "bucket = ? AND is_dir = 0"
 	args := []interface{}{bucket}
@@ -219,11 +221,11 @@ func (c *cacheDB) ListObjects(bucket, prefix, marker string, limit int) ([]Entry
 }
 
 // ListUnprocessedDirs returns a list of unprocessed directory entries up to the specified limit
-func (c *cacheDB) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, error) {
+func (c *cacheDB) ListUnprocessedDirs(bucket string, limit int) ([]fs.EntryInfo, error) {
 	return c.findObjects("bucket = ? AND processed = 0 AND is_dir = 1 ORDER BY path LIMIT ?", bucket, limit)
 }
 
-func (c *cacheDB) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
+func (c *cacheDB) ListEmptyDirs(bucket string, limit int) ([]fs.EntryInfo, error) {
 	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND key != '' AND path || '/' NOT IN (
 		SELECT DISTINCT rtrim(path, replace(path, '/', ''))
 		FROM entries WHERE bucket = ?
@@ -231,12 +233,12 @@ func (c *cacheDB) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
 }
 
 // Stat checks if an object exists and returns its metadata
-func (c *cacheDB) Stat(path string) (EntryInfo, error) {
+func (c *cacheDB) Stat(path string) (fs.EntryInfo, error) {
 	return c.findObject("path = ?", path)
 }
 
 // StatObject checks if an object exists and returns its metadata
-func (c *cacheDB) StatObject(bucket, key string) (EntryInfo, error) {
+func (c *cacheDB) StatObject(bucket, key string) (fs.EntryInfo, error) {
 	return c.findObject("bucket = ? AND key = ?", bucket, key)
 }
 

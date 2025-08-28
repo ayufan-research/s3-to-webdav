@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"s3-to-webdav/internal/access_log"
+	"s3-to-webdav/internal/fs"
 )
 
 func parseInt(s string) int {
@@ -32,7 +33,7 @@ func generateETag(path string, size int64, lastModified int64) string {
 
 type S3Server struct {
 	db        Cache
-	client    Fs
+	client    fs.Fs
 	bucketMap map[string]interface{}
 }
 
@@ -107,7 +108,7 @@ type DeleteError struct {
 	Message string `xml:"Message"`
 }
 
-func NewS3Server(db Cache, client Fs) *S3Server {
+func NewS3Server(db Cache, client fs.Fs) *S3Server {
 	return &S3Server{
 		db:     db,
 		client: client,
@@ -351,7 +352,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 	key := vars["key"]
-	path := PathFromBucketAndKey(bucket, key)
+	path := fs.PathFromBucketAndKey(bucket, key)
 
 	access_log.AddLogContext(r, fmt.Sprintf("put:%s/%s/%d", bucket, key, r.ContentLength))
 
@@ -381,7 +382,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryInfo := EntryInfo{
+	entryInfo := fs.EntryInfo{
 		Path:         path,
 		Bucket:       bucket,
 		Key:          key,
@@ -391,7 +392,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		Processed:    true,
 	}
 
-	entryInfos := append(BaseDirEntries(path), entryInfo)
+	entryInfos := append(fs.BaseDirEntries(path), entryInfo)
 	s.db.InsertObjects(entryInfos...)
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
@@ -403,7 +404,7 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 	key := vars["key"]
-	path := PathFromBucketAndKey(bucket, key)
+	path := fs.PathFromBucketAndKey(bucket, key)
 
 	access_log.AddLogContext(r, fmt.Sprintf("delete:%s/%s", bucket, key))
 
@@ -458,7 +459,7 @@ func (s *S3Server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 
 	for _, obj := range deleteRequest.Objects {
 		key := obj.Key
-		path := PathFromBucketAndKey(bucket, key)
+		path := fs.PathFromBucketAndKey(bucket, key)
 
 		// Remove from database
 		s.db.DeleteObject(path)

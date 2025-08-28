@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"s3-to-webdav/internal/fs"
 )
 
 // DBSync handles synchronization between WebDAV server and database
 type DBSync struct {
-	client     Fs
+	client     fs.Fs
 	db         Cache
 	persistDir string
 
@@ -21,7 +23,7 @@ type DBSync struct {
 }
 
 // NewDBSync creates a new WebDAV synchronizer
-func NewDBSync(client Fs, db Cache, persistDir string) *DBSync {
+func NewDBSync(client fs.Fs, db Cache, persistDir string) *DBSync {
 	return &DBSync{
 		client:     client,
 		db:         db,
@@ -48,7 +50,7 @@ func (ws *DBSync) Clean(bucket string) error {
 		for _, dir := range dirs {
 			infos, err := ws.client.ReadDir(dir.Path)
 
-			if IsNotFound(err) {
+			if fs.IsNotFound(err) {
 				ws.db.DeleteDir(dir.Path)
 				missing++
 			} else if err != nil && !os.IsNotExist(err) {
@@ -88,7 +90,7 @@ func (ws *DBSync) Sync(bucket string) error {
 
 	// Ensure root directory entry exists
 	if entry, err := ws.db.Stat(bucket); err != nil || !entry.IsDir {
-		err := ws.db.InsertObjects(EntryInfo{
+		err := ws.db.InsertObjects(fs.EntryInfo{
 			Path:         bucket,
 			Bucket:       bucket,
 			Key:          "",
@@ -115,7 +117,7 @@ func (ws *DBSync) Sync(bucket string) error {
 
 	const maxParallel = 2
 
-	send := make(chan EntryInfo)
+	send := make(chan fs.EntryInfo)
 	recv := make(chan error)
 	wg := sync.WaitGroup{}
 	wg.Add(maxParallel)
@@ -192,26 +194,26 @@ func (ws *DBSync) walkDir(path string) error {
 
 	// Read directory
 	infos, err := ws.client.ReadDir(path)
-	if IsNotFound(err) {
+	if fs.IsNotFound(err) {
 		return ws.db.SetProcessed(path, true)
 	} else if err != nil {
 		log.Printf("Sync: Failed to read directory %s: %v", path, err)
 		return err
 	}
 
-	batchInfos := make([]EntryInfo, 0, len(infos))
+	batchInfos := make([]fs.EntryInfo, 0, len(infos))
 
 	for _, info := range infos {
 		fullPath := filepath.Join(path, info.Name())
 		fullPath = strings.ReplaceAll(fullPath, "\\", "/")
 
-		bucket, key, ok := BucketAndKeyFromPath(fullPath)
+		bucket, key, ok := fs.BucketAndKeyFromPath(fullPath)
 		if !ok {
 			log.Printf("Sync: Failed to parse path %s", fullPath)
 			continue
 		}
 
-		fileInfo := EntryInfo{
+		fileInfo := fs.EntryInfo{
 			Path:         fullPath,
 			Bucket:       bucket,
 			Key:          key,
