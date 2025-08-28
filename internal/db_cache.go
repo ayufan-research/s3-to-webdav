@@ -75,8 +75,8 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	-- Indexes for performance
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_path ON entries(path);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_bucket_key ON entries(bucket, key);
-	CREATE INDEX IF NOT EXISTS idx_entries_bucket_processed_isdir ON entries(bucket, processed, is_dir);
-	CREATE INDEX IF NOT EXISTS idx_entries_bucket_isdir_key ON entries(bucket, is_dir, key);
+	CREATE INDEX IF NOT EXISTS idx_entries_bucket_processed_isdir ON entries(bucket, processed, is_dir, path);
+	CREATE INDEX IF NOT EXISTS idx_entries_bucket_dirname ON entries (bucket, rtrim(path, replace(path, '/', '')));
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -224,8 +224,8 @@ func (c *DBCache) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, er
 }
 
 func (c *DBCache) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
-	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND path NOT IN (
-		SELECT DISTINCT rtrim(rtrim(path, replace(path, '/', '')), '/')
+	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND path || '/' NOT IN (
+		SELECT DISTINCT rtrim(path, replace(path, '/', ''))
 		FROM entries WHERE bucket = ?
 	) ORDER BY path DESC LIMIT ?`, bucket, bucket, limit)
 }
@@ -253,63 +253,37 @@ func (c *DBCache) GetStats(bucket string) (processed int, unprocessed int, total
 	return processed, unprocessed, totalSize, err
 }
 
-// DeleteObject removes an object from the database
-func (c *DBCache) DeleteObject(path string) (int64, error) {
+func (c *DBCache) execSql(query string, args... any) (int64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Delete entry
-	result, err := c.db.Exec("DELETE FROM entries WHERE path = ?", path)
+	result, err := c.db.Exec(query, args...)
 	if err != nil {
 		return 0, err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	return rowsAffected, err
+}
+
+func (c *DBCache) DeleteObject(path string) (int64, error) {
+	return c.execSql("DELETE FROM entries WHERE path = ?", path)
 }
 
 func (c *DBCache) DeleteDir(path string) (int64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Delete entry
-	result, err := c.db.Exec("DELETE FROM entries WHERE path = ? OR path LIKE ? || '/%'", path, path)
-	if err != nil {
-		return 0, err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	return rowsAffected, err
+	return c.execSql("DELETE FROM entries WHERE path = ? OR path LIKE ? || '/%'", path, path)
 }
 
 func (c *DBCache) DeleteUnprocessed(bucket string) (int64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Delete old entries
-	result, err := c.db.Exec("DELETE FROM entries WHERE bucket = ? AND processed = 0", bucket)
-	if err != nil {
-		return 0, err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	return rowsAffected, err
+	return c.execSql("DELETE FROM entries WHERE bucket = ? AND processed = 0", bucket)
 }
 
-// SetProcessed marks a single entry as processed
 func (c *DBCache) SetProcessed(path string, processed bool) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	_, err := c.db.Exec("UPDATE entries SET processed = ?, updated_at = ? WHERE path = ?", processed, time.Now().Unix(), path)
+	_, err := c.execSql("UPDATE entries SET processed = ?, updated_at = ? WHERE path = ?", processed, time.Now().Unix(), path)
 	return err
 }
 
-// ResetProcessedFlags marks all existing entries as unprocessed for resync
 func (c *DBCache) ResetProcessedFlags(bucket string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	_, err := c.db.Exec("UPDATE entries SET processed = 0 WHERE bucket = ?", bucket)
+	_, err := c.execSql("UPDATE entries SET processed = 0 WHERE bucket = ?", bucket)
 	return err
 }
