@@ -9,13 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"s3-to-webdav/internal/cache"
 	"s3-to-webdav/internal/fs"
 )
 
 // DBSync handles synchronization between WebDAV server and database
 type DBSync struct {
 	client     fs.Fs
-	db         Cache
+	db         cache.Cache
 	persistDir string
 
 	// Statistics
@@ -23,7 +24,7 @@ type DBSync struct {
 }
 
 // NewDBSync creates a new WebDAV synchronizer
-func NewDBSync(client fs.Fs, db Cache, persistDir string) *DBSync {
+func NewDBSync(client fs.Fs, db cache.Cache, persistDir string) *DBSync {
 	return &DBSync{
 		client:     client,
 		db:         db,

@@ -1,4 +1,4 @@
-package internal
+package cache
 
 import (
 	"s3-to-webdav/internal/fs"

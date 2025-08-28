@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"s3-to-webdav/internal/access_log"
+	"s3-to-webdav/internal/cache"
 	"s3-to-webdav/internal/fs"
 )
 
@@ -32,7 +33,7 @@ func generateETag(path string, size int64, lastModified int64) string {
 }
 
 type S3Server struct {
-	db        Cache
+	db        cache.Cache
 	client    fs.Fs
 	bucketMap map[string]interface{}
 }
@@ -108,7 +109,7 @@ type DeleteError struct {
 	Message string `xml:"Message"`
 }
 
-func NewS3Server(db Cache, client fs.Fs) *S3Server {
+func NewS3Server(db cache.Cache, client fs.Fs) *S3Server {
 	return &S3Server{
 		db:     db,
 		client: client,

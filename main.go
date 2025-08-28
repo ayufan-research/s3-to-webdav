@@ -13,6 +13,7 @@ import (
 
 	"s3-to-webdav/internal"
 	"s3-to-webdav/internal/access_log"
+	"s3-to-webdav/internal/cache"
 	"s3-to-webdav/internal/fs"
 )
 
@@ -144,7 +145,7 @@ func loadCerts() (string, string) {
 	return tlsCert, tlsKey
 }
 
-func runServe(db internal.Cache, client fs.Fs, bucketMap map[string]interface{}) {
+func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 	s3Server := internal.NewS3Server(db, client)
 	s3Server.SetBucketMap(bucketMap)
 
@@ -174,7 +175,7 @@ func runServe(db internal.Cache, client fs.Fs, bucketMap map[string]interface{})
 	log.Fatal(http.ListenAndServeTLS(":"+*httpPort, tlsCert, tlsKey, handler))
 }
 
-func runScan(client fs.Fs, db internal.Cache, bucketMap map[string]interface{}) {
+func runScan(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
 	sync := internal.NewDBSync(client, db, *persistDir)
 
 	if *rescan {
@@ -198,7 +199,7 @@ func runScan(client fs.Fs, db internal.Cache, bucketMap map[string]interface{}) 
 	}
 }
 
-func runClean(client fs.Fs, db internal.Cache, bucketMap map[string]interface{}) {
+func runClean(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
 	sync := internal.NewDBSync(client, db, *persistDir)
 
 	for bucket := range bucketMap {
@@ -265,7 +266,7 @@ func main() {
 	log.Printf("Buckets: %v", getMapKeys(bucketMap))
 
 	// Create database cache
-	db, err := internal.NewCacheDB(filepath.Join(*persistDir, "metadata2.db"))
+	db, err := cache.NewCacheDB(filepath.Join(*persistDir, "metadata2.db"))
 	if err != nil {
 		log.Fatalf("Failed to initialize database cache: %v", err)
 	}
