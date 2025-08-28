@@ -224,7 +224,7 @@ func (c *DBCache) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, er
 }
 
 func (c *DBCache) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
-	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND path || '/' NOT IN (
+	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND key != '' AND path || '/' NOT IN (
 		SELECT DISTINCT rtrim(path, replace(path, '/', ''))
 		FROM entries WHERE bucket = ?
 	) ORDER BY path DESC LIMIT ?`, bucket, bucket, limit)
