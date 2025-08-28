@@ -1,4 +1,4 @@
-package internal
+package access_log
 
 import (
 	"fmt"

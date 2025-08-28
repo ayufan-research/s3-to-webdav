@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"s3-to-webdav/internal"
+	"s3-to-webdav/internal/access_log"
 )
 
 var (
@@ -154,7 +155,7 @@ func runServe(db internal.Cache, client internal.Fs, bucketMap map[string]interf
 	handler := internal.S3AuthMiddleware(loadAccessKeys(), r)
 
 	// Wrap with access logging middleware
-	handler = internal.AccessLogMiddleware(handler)
+	handler = access_log.AccessLogMiddleware(handler)
 
 	// Start server with or without TLS
 	if *httpOnly {

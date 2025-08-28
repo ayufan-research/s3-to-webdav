@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"s3-to-webdav/internal/access_log"
 )
 
 // S3AuthConfig holds the configuration for S3 authentication
@@ -30,15 +32,15 @@ func S3AuthMiddleware(config S3AuthConfig, next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if validatePresignedURLV2(r, config) {
-			AddLogContext(r, "presigned-v2")
+			access_log.AddLogContext(r, "presigned-v2")
 		} else if validatePresignedURLV4(r, config) {
-			AddLogContext(r, "presigned-v4")
+			access_log.AddLogContext(r, "presigned-v4")
 		} else if validateAuthorizationV2(r, config) {
-			AddLogContext(r, "auth-v2")
+			access_log.AddLogContext(r, "auth-v2")
 		} else if validateAuthorizationV4(r, config) {
-			AddLogContext(r, "auth-v4")
+			access_log.AddLogContext(r, "auth-v4")
 		} else {
-			AddLogContext(r, "auth-fail")
+			access_log.AddLogContext(r, "auth-fail")
 			w.Header().Set("WWW-Authenticate", "AWS")
 			http.Error(w, "Authorization failed", http.StatusUnauthorized)
 			return

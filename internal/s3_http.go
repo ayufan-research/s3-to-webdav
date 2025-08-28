@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
+	"s3-to-webdav/internal/access_log"
 )
 
 func parseInt(s string) int {
@@ -125,7 +127,7 @@ func (s *S3Server) isBucketAllowed(bucket string) bool {
 }
 
 func (s *S3Server) handleListBuckets(w http.ResponseWriter, r *http.Request) {
-	AddLogContext(r, "list-buckets")
+	access_log.AddLogContext(r, "list-buckets")
 
 	// Use specified bucket map (buckets are required)
 	buckets := make([]string, 0, len(s.bucketMap))
@@ -173,12 +175,12 @@ func (s *S3Server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		if marker == "" {
 			marker = r.URL.Query().Get("start-after")
 		}
-		AddLogContext(r, fmt.Sprintf("list-objects-v2:%s", bucket))
+		access_log.AddLogContext(r, fmt.Sprintf("list-objects-v2:%s", bucket))
 	} else {
 		// ListObjects (V1) parameters
 		prefix = r.URL.Query().Get("prefix")
 		marker = r.URL.Query().Get("marker")
-		AddLogContext(r, fmt.Sprintf("list-objects:%s", bucket))
+		access_log.AddLogContext(r, fmt.Sprintf("list-objects:%s", bucket))
 	}
 
 	// Default limit to 1000, but allow customization via max-keys parameter
@@ -251,7 +253,7 @@ func (s *S3Server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
-	AddLogContext(r, fmt.Sprintf("head-bucket:%s", bucket))
+	access_log.AddLogContext(r, fmt.Sprintf("head-bucket:%s", bucket))
 
 	// Validate bucket is allowed (buckets are required)
 	if !s.isBucketAllowed(bucket) {
@@ -268,7 +270,7 @@ func (s *S3Server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	bucket := vars["bucket"]
 	key := vars["key"]
 
-	AddLogContext(r, fmt.Sprintf("head:%s/%s", bucket, key))
+	access_log.AddLogContext(r, fmt.Sprintf("head:%s/%s", bucket, key))
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -303,7 +305,7 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	bucket := vars["bucket"]
 	key := vars["key"]
 
-	AddLogContext(r, fmt.Sprintf("get:%s/%s", bucket, key))
+	access_log.AddLogContext(r, fmt.Sprintf("get:%s/%s", bucket, key))
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -314,7 +316,7 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	entryInfo, err := s.db.StatObject(bucket, key)
 	if err != nil || entryInfo.IsDir {
 		http.Error(w, "Object not found", http.StatusNotFound)
-		AddLogContext(r, "local-fail")
+		access_log.AddLogContext(r, "local-fail")
 		return
 	}
 
@@ -336,7 +338,7 @@ func (s *S3Server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	reader, err := s.client.ReadStream(entryInfo.Path)
 	if err != nil {
 		http.Error(w, "Object not found", http.StatusNotFound)
-		AddLogContext(r, "remote-fail")
+		access_log.AddLogContext(r, "remote-fail")
 		return
 	}
 	defer reader.Close()
@@ -351,7 +353,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 	path := PathFromBucketAndKey(bucket, key)
 
-	AddLogContext(r, fmt.Sprintf("put:%s/%s/%d", bucket, key, r.ContentLength))
+	access_log.AddLogContext(r, fmt.Sprintf("put:%s/%s/%d", bucket, key, r.ContentLength))
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -367,7 +369,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	err := s.client.WriteStream(path, r.Body, r.ContentLength, 0644)
 	if err != nil {
 		http.Error(w, "Failed to upload object", http.StatusInternalServerError)
-		AddLogContext(r, "remote-fail")
+		access_log.AddLogContext(r, "remote-fail")
 		return
 	}
 
@@ -375,7 +377,7 @@ func (s *S3Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	stat, err := s.client.Stat(path)
 	if err != nil {
 		http.Error(w, "Failed to stat uploaded object", http.StatusInternalServerError)
-		AddLogContext(r, "stat-fail")
+		access_log.AddLogContext(r, "stat-fail")
 		return
 	}
 
@@ -403,7 +405,7 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 	path := PathFromBucketAndKey(bucket, key)
 
-	AddLogContext(r, fmt.Sprintf("delete:%s/%s", bucket, key))
+	access_log.AddLogContext(r, fmt.Sprintf("delete:%s/%s", bucket, key))
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -417,7 +419,7 @@ func (s *S3Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	err := s.client.Remove(path)
 	if err != nil {
 		http.Error(w, "Failed to delete object", http.StatusInternalServerError)
-		AddLogContext(r, "remote-fail")
+		access_log.AddLogContext(r, "remote-fail")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -428,7 +430,7 @@ func (s *S3Server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
-	AddLogContext(r, fmt.Sprintf("bulk-delete:%s", bucket))
+	access_log.AddLogContext(r, fmt.Sprintf("bulk-delete:%s", bucket))
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
