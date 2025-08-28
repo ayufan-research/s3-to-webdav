@@ -11,10 +11,10 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"s3-to-webdav/internal"
 	"s3-to-webdav/internal/access_log"
 	"s3-to-webdav/internal/cache"
 	"s3-to-webdav/internal/fs"
+	"s3-to-webdav/internal/helpers"
 	"s3-to-webdav/internal/s3"
 	"s3-to-webdav/internal/sync"
 )
@@ -118,11 +118,11 @@ func loadAccessKeys() s3.AuthConfig {
 	}
 
 	log.Printf("S3: Generated/loaded credentials from %s", *persistDir)
-	accessKey, err := internal.GetOrCreateRandomSecret(filepath.Join(*persistDir, "access_key"), 20)
+	accessKey, err := helpers.GetOrCreateRandomSecret(filepath.Join(*persistDir, "access_key"), 20)
 	if err != nil {
 		log.Fatalf("Failed to get/create S3 access key: %v", err)
 	}
-	secretKey, err := internal.GetOrCreateRandomSecret(filepath.Join(*persistDir, "secret_key"), 20)
+	secretKey, err := helpers.GetOrCreateRandomSecret(filepath.Join(*persistDir, "secret_key"), 20)
 	if err != nil {
 		log.Fatalf("Failed to get/create S3 secret key: %v", err)
 	}
@@ -140,7 +140,7 @@ func loadCerts() (string, string) {
 	}
 
 	// Generate certificates if those are missing
-	tlsCert, tlsKey, err := internal.GetOrCreateCertificates(*persistDir)
+	tlsCert, tlsKey, err := helpers.GetOrCreateCertificates(*persistDir)
 	if err != nil {
 		log.Fatalf("Failed to get/create certificates: %v", err)
 	}
@@ -170,7 +170,7 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 
 	tlsCert, tlsKey := loadCerts()
 	log.Printf("TLS: Certificate: %s / %s", tlsCert, tlsKey)
-	if fingerprint, err := internal.GetCertificateFingerprint(tlsCert); err == nil {
+	if fingerprint, err := helpers.GetCertificateFingerprint(tlsCert); err == nil {
 		log.Printf("TLS: Fingerprint: %s", fingerprint)
 	}
 	log.Printf("HTTPS: Server ready! Listening on https://:%s", *httpPort)
