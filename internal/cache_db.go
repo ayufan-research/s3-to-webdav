@@ -9,20 +9,20 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DBCache handles all database operations for the S3-to-WebDAV server
-type DBCache struct {
+// cacheDB handles all database operations for the S3-to-WebDAV server
+type cacheDB struct {
 	db *sql.DB
 	mu sync.RWMutex
 }
 
-// NewDBCache initializes a new database cache
-func NewDBCache(dbPath string) (*DBCache, error) {
+// NewCacheDB initializes a new database cache
+func NewCacheDB(dbPath string) (Cache, error) {
 	db, err := initDatabase(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %v", err)
 	}
 
-	cache := &DBCache{
+	cache := &cacheDB{
 		db: db,
 	}
 
@@ -30,7 +30,7 @@ func NewDBCache(dbPath string) (*DBCache, error) {
 }
 
 // Close closes the database connection
-func (c *DBCache) Close() error {
+func (c *cacheDB) Close() error {
 	if c.db != nil {
 		return c.db.Close()
 	}
@@ -86,7 +86,7 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 }
 
 // InsertObjects inserts multiple objects in a single transaction
-func (c *DBCache) InsertObjects(objects ...EntryInfo) error {
+func (c *cacheDB) InsertObjects(objects ...EntryInfo) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -127,7 +127,7 @@ func (c *DBCache) InsertObjects(objects ...EntryInfo) error {
 	return tx.Commit()
 }
 
-func (c *DBCache) scanEntry(scanner func(dest ...any) error) (EntryInfo, error) {
+func (c *cacheDB) scanEntry(scanner func(dest ...any) error) (EntryInfo, error) {
 	var path, bucket, key string
 	var size, lastModified int64
 	var isDir, processed int
@@ -147,7 +147,7 @@ func (c *DBCache) scanEntry(scanner func(dest ...any) error) (EntryInfo, error) 
 	}, nil
 }
 
-func (c *DBCache) findObject(where string, args ...any) (EntryInfo, error) {
+func (c *cacheDB) findObject(where string, args ...any) (EntryInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -157,7 +157,7 @@ func (c *DBCache) findObject(where string, args ...any) (EntryInfo, error) {
 	return c.scanEntry(row.Scan)
 }
 
-func (c *DBCache) findObjects(where string, args ...any) ([]EntryInfo, error) {
+func (c *cacheDB) findObjects(where string, args ...any) ([]EntryInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -185,7 +185,7 @@ func (c *DBCache) findObjects(where string, args ...any) ([]EntryInfo, error) {
 // ListObjects retrieves objects from a bucket with optional prefix and marker
 // Returns objects up to the specified limit, ordered by path
 // Also returns whether results were truncated
-func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]EntryInfo, bool, error) {
+func (c *cacheDB) ListObjects(bucket, prefix, marker string, limit int) ([]EntryInfo, bool, error) {
 	// Base query
 	query := "bucket = ? AND is_dir = 0"
 	args := []interface{}{bucket}
@@ -219,11 +219,11 @@ func (c *DBCache) ListObjects(bucket, prefix, marker string, limit int) ([]Entry
 }
 
 // ListUnprocessedDirs returns a list of unprocessed directory entries up to the specified limit
-func (c *DBCache) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, error) {
+func (c *cacheDB) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, error) {
 	return c.findObjects("bucket = ? AND processed = 0 AND is_dir = 1 ORDER BY path LIMIT ?", bucket, limit)
 }
 
-func (c *DBCache) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
+func (c *cacheDB) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
 	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND key != '' AND path || '/' NOT IN (
 		SELECT DISTINCT rtrim(path, replace(path, '/', ''))
 		FROM entries WHERE bucket = ?
@@ -231,17 +231,17 @@ func (c *DBCache) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
 }
 
 // Stat checks if an object exists and returns its metadata
-func (c *DBCache) Stat(path string) (EntryInfo, error) {
+func (c *cacheDB) Stat(path string) (EntryInfo, error) {
 	return c.findObject("path = ?", path)
 }
 
 // StatObject checks if an object exists and returns its metadata
-func (c *DBCache) StatObject(bucket, key string) (EntryInfo, error) {
+func (c *cacheDB) StatObject(bucket, key string) (EntryInfo, error) {
 	return c.findObject("bucket = ? AND key = ?", bucket, key)
 }
 
 // GetStats returns the number of processed and unprocessed entries
-func (c *DBCache) GetStats(bucket string) (processed int, unprocessed int, totalSize int64, err error) {
+func (c *cacheDB) GetStats(bucket string) (processed int, unprocessed int, totalSize int64, err error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -253,7 +253,7 @@ func (c *DBCache) GetStats(bucket string) (processed int, unprocessed int, total
 	return processed, unprocessed, totalSize, err
 }
 
-func (c *DBCache) execSql(query string, args... any) (int64, error) {
+func (c *cacheDB) execSql(query string, args ...any) (int64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -266,24 +266,24 @@ func (c *DBCache) execSql(query string, args... any) (int64, error) {
 	return rowsAffected, err
 }
 
-func (c *DBCache) DeleteObject(path string) (int64, error) {
+func (c *cacheDB) DeleteObject(path string) (int64, error) {
 	return c.execSql("DELETE FROM entries WHERE path = ?", path)
 }
 
-func (c *DBCache) DeleteDir(path string) (int64, error) {
+func (c *cacheDB) DeleteDir(path string) (int64, error) {
 	return c.execSql("DELETE FROM entries WHERE path = ? OR path LIKE ? || '/%'", path, path)
 }
 
-func (c *DBCache) DeleteUnprocessed(bucket string) (int64, error) {
+func (c *cacheDB) DeleteUnprocessed(bucket string) (int64, error) {
 	return c.execSql("DELETE FROM entries WHERE bucket = ? AND processed = 0", bucket)
 }
 
-func (c *DBCache) SetProcessed(path string, processed bool) error {
+func (c *cacheDB) SetProcessed(path string, processed bool) error {
 	_, err := c.execSql("UPDATE entries SET processed = ?, updated_at = ? WHERE path = ?", processed, time.Now().Unix(), path)
 	return err
 }
 
-func (c *DBCache) ResetProcessedFlags(bucket string) error {
+func (c *cacheDB) ResetProcessedFlags(bucket string) error {
 	_, err := c.execSql("UPDATE entries SET processed = 0 WHERE bucket = ?", bucket)
 	return err
 }

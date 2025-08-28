@@ -13,7 +13,7 @@ import (
 // DBSync handles synchronization between WebDAV server and database
 type DBSync struct {
 	client     Fs
-	db         *DBCache
+	db         Cache
 	persistDir string
 
 	// Statistics
@@ -21,7 +21,7 @@ type DBSync struct {
 }
 
 // NewDBSync creates a new WebDAV synchronizer
-func NewDBSync(client Fs, db *DBCache, persistDir string) *DBSync {
+func NewDBSync(client Fs, db Cache, persistDir string) *DBSync {
 	return &DBSync{
 		client:     client,
 		db:         db,

@@ -29,7 +29,7 @@ func generateETag(path string, size int64, lastModified int64) string {
 }
 
 type S3Server struct {
-	db        *DBCache
+	db        Cache
 	client    Fs
 	bucketMap map[string]interface{}
 }
@@ -105,7 +105,7 @@ type DeleteError struct {
 	Message string `xml:"Message"`
 }
 
-func NewS3Server(db *DBCache, client Fs) *S3Server {
+func NewS3Server(db Cache, client Fs) *S3Server {
 	return &S3Server{
 		db:     db,
 		client: client,

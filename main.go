@@ -142,7 +142,7 @@ func loadCerts() (string, string) {
 	return tlsCert, tlsKey
 }
 
-func runServe(db *internal.DBCache, client internal.Fs, bucketMap map[string]interface{}) {
+func runServe(db internal.Cache, client internal.Fs, bucketMap map[string]interface{}) {
 	s3Server := internal.NewS3Server(db, client)
 	s3Server.SetBucketMap(bucketMap)
 
@@ -172,7 +172,7 @@ func runServe(db *internal.DBCache, client internal.Fs, bucketMap map[string]int
 	log.Fatal(http.ListenAndServeTLS(":"+*httpPort, tlsCert, tlsKey, handler))
 }
 
-func runScan(client internal.Fs, db *internal.DBCache, bucketMap map[string]interface{}) {
+func runScan(client internal.Fs, db internal.Cache, bucketMap map[string]interface{}) {
 	sync := internal.NewDBSync(client, db, *persistDir)
 
 	if *rescan {
@@ -196,7 +196,7 @@ func runScan(client internal.Fs, db *internal.DBCache, bucketMap map[string]inte
 	}
 }
 
-func runClean(client internal.Fs, db *internal.DBCache, bucketMap map[string]interface{}) {
+func runClean(client internal.Fs, db internal.Cache, bucketMap map[string]interface{}) {
 	sync := internal.NewDBSync(client, db, *persistDir)
 
 	for bucket := range bucketMap {
@@ -263,7 +263,7 @@ func main() {
 	log.Printf("Buckets: %v", getMapKeys(bucketMap))
 
 	// Create database cache
-	db, err := internal.NewDBCache(filepath.Join(*persistDir, "metadata2.db"))
+	db, err := internal.NewCacheDB(filepath.Join(*persistDir, "metadata2.db"))
 	if err != nil {
 		log.Fatalf("Failed to initialize database cache: %v", err)
 	}
