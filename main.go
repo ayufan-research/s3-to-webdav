@@ -16,6 +16,7 @@ import (
 	"s3-to-webdav/internal/cache"
 	"s3-to-webdav/internal/fs"
 	"s3-to-webdav/internal/s3"
+	"s3-to-webdav/internal/sync"
 )
 
 var (
@@ -177,7 +178,7 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 }
 
 func runScan(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
-	sync := internal.NewDBSync(client, db, *persistDir)
+	sync := sync.New(client, db)
 
 	if *rescan {
 		// Reset marker files
@@ -201,7 +202,7 @@ func runScan(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
 }
 
 func runClean(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
-	sync := internal.NewDBSync(client, db, *persistDir)
+	sync := sync.New(client, db)
 
 	for bucket := range bucketMap {
 		if err := sync.Clean(bucket); err != nil {

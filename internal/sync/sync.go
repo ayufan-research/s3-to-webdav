@@ -1,4 +1,4 @@
-package internal
+package sync
 
 import (
 	"fmt"
@@ -13,26 +13,24 @@ import (
 	"s3-to-webdav/internal/fs"
 )
 
-// DBSync handles synchronization between WebDAV server and database
-type DBSync struct {
-	client     fs.Fs
-	db         cache.Cache
-	persistDir string
+// Sync handles synchronization between WebDAV server and database
+type Sync struct {
+	client fs.Fs
+	db     cache.Cache
 
 	// Statistics
 	lastStatus time.Time
 }
 
-// NewDBSync creates a new WebDAV synchronizer
-func NewDBSync(client fs.Fs, db cache.Cache, persistDir string) *DBSync {
-	return &DBSync{
-		client:     client,
-		db:         db,
-		persistDir: persistDir,
+// New creates a new WebDAV synchronizer
+func New(client fs.Fs, db cache.Cache) *Sync {
+	return &Sync{
+		client: client,
+		db:     db,
 	}
 }
 
-func (ws *DBSync) Clean(bucket string) error {
+func (ws *Sync) Clean(bucket string) error {
 	start := time.Now()
 
 	missing := 0
@@ -86,7 +84,7 @@ func (ws *DBSync) Clean(bucket string) error {
 }
 
 // Sync performs a sync of WebDAV content to the database
-func (ws *DBSync) Sync(bucket string) error {
+func (ws *Sync) Sync(bucket string) error {
 	start := time.Now()
 
 	// Ensure root directory entry exists
@@ -187,7 +185,7 @@ func (ws *DBSync) Sync(bucket string) error {
 	return nil
 }
 
-func (ws *DBSync) walkDir(path string) error {
+func (ws *Sync) walkDir(path string) error {
 	// Ignore recently processed
 	if entryInfo, err := ws.db.Stat(path); err == nil && (!entryInfo.IsDir || entryInfo.Processed) {
 		return nil
@@ -239,7 +237,7 @@ func (ws *DBSync) walkDir(path string) error {
 	return nil
 }
 
-func (ws *DBSync) printStats(bucket string) {
+func (ws *Sync) printStats(bucket string) {
 	if time.Since(ws.lastStatus) < time.Second {
 		return
 	}
