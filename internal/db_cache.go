@@ -223,6 +223,13 @@ func (c *DBCache) ListUnprocessedDirs(bucket string, limit int) ([]EntryInfo, er
 	return c.findObjects("bucket = ? AND processed = 0 AND is_dir = 1 ORDER BY path LIMIT ?", bucket, limit)
 }
 
+func (c *DBCache) ListEmptyDirs(bucket string, limit int) ([]EntryInfo, error) {
+	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND path NOT IN (
+		SELECT DISTINCT rtrim(rtrim(path, replace(path, '/', '')), '/')
+		FROM entries WHERE bucket = ?
+	) ORDER BY path DESC LIMIT ?`, bucket, bucket, limit)
+}
+
 // Stat checks if an object exists and returns its metadata
 func (c *DBCache) Stat(path string) (EntryInfo, error) {
 	return c.findObject("path = ?", path)
@@ -247,13 +254,32 @@ func (c *DBCache) GetStats(bucket string) (processed int, unprocessed int, total
 }
 
 // DeleteObject removes an object from the database
-func (c *DBCache) DeleteObject(path string) error {
+func (c *DBCache) DeleteObject(path string) (int64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Delete entry
-	_, err := c.db.Exec("DELETE FROM entries WHERE path = ?", path)
-	return err
+	result, err := c.db.Exec("DELETE FROM entries WHERE path = ?", path)
+	if err != nil {
+		return 0, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	return rowsAffected, err
+}
+
+func (c *DBCache) DeleteDir(path string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Delete entry
+	result, err := c.db.Exec("DELETE FROM entries WHERE path = ? OR path LIKE ? || '/%'", path, path)
+	if err != nil {
+		return 0, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	return rowsAffected, err
 }
 
 func (c *DBCache) DeleteUnprocessed(bucket string) (int64, error) {
@@ -270,12 +296,12 @@ func (c *DBCache) DeleteUnprocessed(bucket string) (int64, error) {
 	return rowsAffected, err
 }
 
-// MarkAsProcessed marks a single entry as processed
-func (c *DBCache) MarkAsProcessed(path string) error {
+// SetProcessed marks a single entry as processed
+func (c *DBCache) SetProcessed(path string, processed bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	_, err := c.db.Exec("UPDATE entries SET processed = 1, updated_at = ? WHERE path = ?", time.Now().Unix(), path)
+	_, err := c.db.Exec("UPDATE entries SET processed = ?, updated_at = ? WHERE path = ?", processed, time.Now().Unix(), path)
 	return err
 }
 

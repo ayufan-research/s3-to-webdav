@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 
@@ -66,40 +65,6 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
-}
-
-var cleanStats time.Time
-var cleanProcessed int
-var cleanRemoved int
-var cleanCount int
-
-func cleanEmptyDirectories(client internal.Fs, currentPath string) error {
-	if time.Since(cleanStats) > time.Second {
-		log.Printf("Clean: %d directories checked, %d removed, %d count", cleanProcessed, cleanRemoved, cleanCount)
-		cleanStats = time.Now()
-	}
-
-	cleanProcessed++
-	entries, err := client.ReadDir(currentPath)
-	if err != nil {
-		return fmt.Errorf("failed to read directory %s: %w", currentPath, err)
-	}
-	cleanCount += len(entries)
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			err = cleanEmptyDirectories(client, filepath.Join(currentPath, entry.Name()))
-			if err != nil {
-				log.Printf("Clean: %v", err)
-			}
-		}
-	}
-
-	if len(entries) == 0 {
-		cleanRemoved++
-		err = client.Remove(currentPath)
-	}
-	return nil
 }
 
 func usage() {
@@ -232,13 +197,15 @@ func runScan(client internal.Fs, db *internal.DBCache, bucketMap map[string]inte
 }
 
 func runClean(client internal.Fs, db *internal.DBCache, bucketMap map[string]interface{}) {
+	sync := internal.NewDBSync(client, db, *persistDir)
+
 	for bucket := range bucketMap {
-		if err := cleanEmptyDirectories(client, bucket); err != nil {
-			log.Printf("Clean: Failed to clean empty directories for bucket %s: %v", bucket, err)
+		if err := sync.Clean(bucket); err != nil {
+			log.Fatalf("Failed to perform clean for bucket %s: %v", bucket, err)
 		}
 	}
-	log.Printf("Clean: Command completed successfully. Checked %d directories, removed %d, total entries %d",
-		cleanProcessed, cleanRemoved, cleanCount)
+
+	log.Printf("Clean: Completed cleaning for all buckets")
 	os.Exit(0)
 }
 

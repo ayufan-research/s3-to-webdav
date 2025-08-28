@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,6 +27,59 @@ func NewDBSync(client Fs, db *DBCache, persistDir string) *DBSync {
 		db:         db,
 		persistDir: persistDir,
 	}
+}
+
+func (ws *DBSync) Clean(bucket string) error {
+	start := time.Now()
+
+	missing := 0
+	removed := 0
+	rescanned := 0
+	errors := 0
+
+	for {
+		dirs, err := ws.db.ListEmptyDirs(bucket, 50)
+		if err != nil {
+			return fmt.Errorf("failed to list empty dirs: %v", err)
+		} else if len(dirs) == 0 {
+			break
+		}
+
+		for _, dir := range dirs {
+			infos, err := ws.client.ReadDir(dir.Path)
+
+			if IsNotFound(err) {
+				ws.db.DeleteDir(dir.Path)
+				missing++
+			} else if err != nil && !os.IsNotExist(err) {
+				log.Printf("Clean: Failed to read dir %s: %v", dir.Path, err)
+				errors++
+			} else if len(infos) > 0 {
+				// Has files, re-process directory
+				if err := ws.db.SetProcessed(dir.Path, false); err != nil {
+					log.Printf("Clean: Failed to mark dir %s as unprocessed: %v", dir.Path, err)
+					errors++
+				} else {
+					rescanned++
+				}
+			} else {
+				if err := ws.client.Remove(dir.Path); err == nil {
+					ws.db.DeleteDir(dir.Path)
+					removed++
+				} else {
+					log.Printf("Clean: Failed to delete empty dir %s: %v", dir.Path, err)
+					errors++
+				}
+			}
+		}
+
+		ws.printStats(bucket)
+	}
+
+	log.Printf("Clean: Found %d missing, %d removed, %d rescanned, %d errors",
+		missing, removed, rescanned, errors)
+	log.Printf("Clean: Completed in %v for %s bucket", time.Since(start), bucket)
+	return nil
 }
 
 // Sync performs a sync of WebDAV content to the database
@@ -138,7 +192,9 @@ func (ws *DBSync) walkDir(path string) error {
 
 	// Read directory
 	infos, err := ws.client.ReadDir(path)
-	if err != nil {
+	if IsNotFound(err) {
+		return ws.db.SetProcessed(path, true)
+	} else if err != nil {
 		log.Printf("Sync: Failed to read directory %s: %v", path, err)
 		return err
 	}
@@ -172,7 +228,7 @@ func (ws *DBSync) walkDir(path string) error {
 		return err
 	}
 
-	err = ws.db.MarkAsProcessed(path)
+	err = ws.db.SetProcessed(path, true)
 	if err != nil {
 		return err
 	}
