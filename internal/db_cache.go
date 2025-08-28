@@ -85,25 +85,8 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// InsertObject inserts a single object into the database
-func (c *DBCache) InsertObject(fileInfo EntryInfo) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	now := time.Now().Unix()
-
-	// Insert entry
-	_, err := c.db.Exec(`
-		INSERT OR REPLACE INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		fileInfo.Path, fileInfo.Bucket, fileInfo.Key, fileInfo.Size, fileInfo.LastModified,
-		map[bool]int{false: 0, true: 1}[fileInfo.IsDir], now, map[bool]int{false: 0, true: 1}[fileInfo.Processed])
-
-	return err
-}
-
-// BatchInsertObjects inserts multiple objects in a single transaction
-func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
+// InsertObjects inserts multiple objects in a single transaction
+func (c *DBCache) InsertObjects(objects ...EntryInfo) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -122,8 +105,9 @@ func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			bucket = excluded.bucket, key = excluded.key, size = excluded.size,
-			last_modified = excluded.last_modified, is_dir = excluded.is_dir, updated_at = excluded.updated_at,
-			processed = excluded.processed or entries.processed;
+			is_dir = excluded.is_dir, updated_at = excluded.updated_at,
+			last_modified = MAX(excluded.last_modified, last_modified),
+			processed = MAX(excluded.processed, processed)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %v", err)
@@ -134,7 +118,7 @@ func (c *DBCache) BatchInsertObjects(objects []EntryInfo) error {
 
 	for _, obj := range objects {
 		_, err := stmt.Exec(obj.Path, obj.Bucket, obj.Key, obj.Size,
-			obj.LastModified, map[bool]int{false: 0, true: 1}[obj.IsDir], now, map[bool]int{false: 0, true: 1}[obj.Processed])
+			obj.LastModified, obj.IsDir, now, obj.Processed)
 		if err != nil {
 			return fmt.Errorf("failed to insert object %s: %v", obj.Path, err)
 		}

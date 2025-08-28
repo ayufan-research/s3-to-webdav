@@ -34,7 +34,7 @@ func (ws *DBSync) Sync(bucket string) error {
 
 	// Ensure root directory entry exists
 	if entry, err := ws.db.Stat(bucket); err != nil || !entry.IsDir {
-		err := ws.db.InsertObject(EntryInfo{
+		err := ws.db.InsertObjects(EntryInfo{
 			Path:         bucket,
 			Bucket:       bucket,
 			Key:          "",
@@ -167,7 +167,7 @@ func (ws *DBSync) walkDir(path string) error {
 		batchInfos = append(batchInfos, fileInfo)
 	}
 
-	err = ws.db.BatchInsertObjects(batchInfos)
+	err = ws.db.InsertObjects(batchInfos...)
 	if err != nil {
 		return err
 	}
