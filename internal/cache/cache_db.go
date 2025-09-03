@@ -187,9 +187,9 @@ func (c *cacheDB) findObjects(where string, args ...any) ([]fs.EntryInfo, error)
 // ListObjects retrieves objects from a bucket with optional prefix and marker
 // Returns objects up to the specified limit, ordered by path
 // Also returns whether results were truncated
-func (c *cacheDB) ListObjects(bucket, prefix, marker string, limit int) ([]fs.EntryInfo, bool, error) {
+func (c *cacheDB) ListObjects(bucket, prefix, marker string, dirOnly bool, limit int) ([]fs.EntryInfo, bool, error) {
 	// Base query
-	query := "bucket = ? AND is_dir = 0"
+	query := "bucket = ?"
 	args := []interface{}{bucket}
 
 	if prefix != "" {
@@ -199,6 +199,13 @@ func (c *cacheDB) ListObjects(bucket, prefix, marker string, limit int) ([]fs.En
 	if marker != "" {
 		query += " AND key > ?"
 		args = append(args, marker)
+	}
+
+	if dirOnly {
+		query += " AND key NOT LIKE ? AND key <> ''"
+		args = append(args, prefix+"%/%")
+	} else {
+		query += " AND is_dir = 0"
 	}
 
 	// Query for limit+1 to determine if results are truncated

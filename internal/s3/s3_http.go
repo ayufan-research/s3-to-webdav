@@ -54,26 +54,30 @@ type Bucket struct {
 }
 
 type ListBucketResult struct {
-	XMLName     xml.Name `xml:"ListBucketResult"`
-	Name        string   `xml:"Name"`
-	Prefix      string   `xml:"Prefix"`
-	MaxKeys     int      `xml:"MaxKeys"`
-	IsTruncated bool     `xml:"IsTruncated"`
-	NextMarker  string   `xml:"NextMarker,omitempty"`
-	Contents    []Object `xml:"Contents"`
+	XMLName        xml.Name       `xml:"ListBucketResult"`
+	Name           string         `xml:"Name"`
+	Prefix         string         `xml:"Prefix"`
+	Delimiter      string         `xml:"Delimiter,omitempty"`
+	MaxKeys        int            `xml:"MaxKeys"`
+	IsTruncated    bool           `xml:"IsTruncated"`
+	NextMarker     string         `xml:"NextMarker,omitempty"`
+	Contents       []Object       `xml:"Contents"`
+	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes"`
 }
 
 type ListBucketResultV2 struct {
-	XMLName               xml.Name `xml:"ListBucketResult"`
-	Name                  string   `xml:"Name"`
-	Prefix                string   `xml:"Prefix"`
-	MaxKeys               int      `xml:"MaxKeys"`
-	IsTruncated           bool     `xml:"IsTruncated"`
-	KeyCount              int      `xml:"KeyCount"`
-	ContinuationToken     string   `xml:"ContinuationToken,omitempty"`
-	NextContinuationToken string   `xml:"NextContinuationToken,omitempty"`
-	StartAfter            string   `xml:"StartAfter,omitempty"`
-	Contents              []Object `xml:"Contents"`
+	XMLName               xml.Name       `xml:"ListBucketResult"`
+	Name                  string         `xml:"Name"`
+	Prefix                string         `xml:"Prefix"`
+	Delimiter             string         `xml:"Delimiter,omitempty"`
+	MaxKeys               int            `xml:"MaxKeys"`
+	IsTruncated           bool           `xml:"IsTruncated"`
+	KeyCount              int            `xml:"KeyCount"`
+	ContinuationToken     string         `xml:"ContinuationToken,omitempty"`
+	NextContinuationToken string         `xml:"NextContinuationToken,omitempty"`
+	StartAfter            string         `xml:"StartAfter,omitempty"`
+	Contents              []Object       `xml:"Contents"`
+	CommonPrefixes        []CommonPrefix `xml:"CommonPrefixes"`
 }
 
 type Object struct {
@@ -82,6 +86,10 @@ type Object struct {
 	ETag         string `xml:"ETag"`
 	Size         int64  `xml:"Size"`
 	StorageClass string `xml:"StorageClass"`
+}
+
+type CommonPrefix struct {
+	Prefix string `xml:"Prefix"`
 }
 
 // Bulk delete structures
@@ -164,13 +172,22 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
 		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		access_log.AddLogContext(r, "no-such-bucket:%s", bucket)
 		return
 	}
 
 	// Check if this is ListObjectsV2 request
 	isV2 := r.URL.Query().Get("list-type") == "2"
 
-	var prefix, marker string
+	var prefix, marker, delimiter string
+	delimiter = r.URL.Query().Get("delimiter")
+
+	if delimiter != "" && delimiter != "/" {
+		http.Error(w, "InvalidDelimiter", http.StatusBadRequest)
+		access_log.AddLogContext(r, "invalid-delimiter:%s", delimiter)
+		return
+	}
+
 	if isV2 {
 		// ListObjectsV2 parameters
 		prefix = r.URL.Query().Get("prefix")
@@ -194,22 +211,31 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	files, truncated, err := s.db.ListObjects(bucket, prefix, marker, limit)
+	files, truncated, err := s.db.ListObjects(bucket, prefix, marker, delimiter == "/", limit)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	objects := make([]Object, len(files))
-	for i, file := range files {
+	objects := make([]Object, 0, len(files))
+	commonPrefixes := make([]CommonPrefix, 0)
+
+	for _, file := range files {
+		if file.IsDir {
+			commonPrefixes = append(commonPrefixes, CommonPrefix{
+				Prefix: file.Key + "/",
+			})
+			continue
+		}
+
 		etag := generateETag(file.Path, file.Size, file.LastModified)
-		objects[i] = Object{
+		objects = append(objects, Object{
 			Key:          file.Key,
 			LastModified: time.Unix(file.LastModified, 0).Format(time.RFC3339),
 			ETag:         etag,
 			Size:         file.Size,
 			StorageClass: "STANDARD",
-		}
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
@@ -226,11 +252,13 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 			Prefix:                prefix,
 			MaxKeys:               limit,
 			IsTruncated:           truncated,
+			Delimiter:             delimiter,
 			KeyCount:              len(objects),
 			ContinuationToken:     r.URL.Query().Get("continuation-token"),
 			NextContinuationToken: nextContinuationToken,
 			StartAfter:            r.URL.Query().Get("start-after"),
 			Contents:              objects,
+			CommonPrefixes:        commonPrefixes,
 		}
 		xml.NewEncoder(w).Encode(resultV2)
 	} else {
@@ -241,12 +269,14 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		}
 
 		result := ListBucketResult{
-			Name:        bucket,
-			Prefix:      prefix,
-			MaxKeys:     limit,
-			IsTruncated: truncated,
-			NextMarker:  nextMarker,
-			Contents:    objects,
+			Name:           bucket,
+			Prefix:         prefix,
+			MaxKeys:        limit,
+			IsTruncated:    truncated,
+			NextMarker:     nextMarker,
+			Contents:       objects,
+			Delimiter:      delimiter,
+			CommonPrefixes: commonPrefixes,
 		}
 		xml.NewEncoder(w).Encode(result)
 	}

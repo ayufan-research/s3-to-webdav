@@ -7,7 +7,7 @@ import (
 type Cache interface {
 	Close() error
 	InsertObjects(objects ...fs.EntryInfo) error
-	ListObjects(bucket, prefix, marker string, limit int) ([]fs.EntryInfo, bool, error)
+	ListObjects(bucket, prefix, marker string, dirOnly bool, limit int) ([]fs.EntryInfo, bool, error)
 	ListUnprocessedDirs(bucket string, limit int) ([]fs.EntryInfo, error)
 	ListEmptyDirs(bucket string, limit int) ([]fs.EntryInfo, error)
 	Stat(path string) (fs.EntryInfo, error)
