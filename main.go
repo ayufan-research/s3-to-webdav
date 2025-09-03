@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +19,9 @@ import (
 	"s3-to-webdav/internal/s3"
 	"s3-to-webdav/internal/sync"
 )
+
+//go:embed web/index.html
+var browserHTML []byte
 
 var (
 	// WebDAV configuration
@@ -50,6 +54,9 @@ var (
 
 	// Help
 	help = flag.Bool("help", false, "Show help message")
+
+	// Debug mode
+	browser = flag.Bool("browser", getEnvOrDefault("BROWSER", "false") == "true", "Enable built-in browser")
 
 	// Maintenance commands
 	clean  = flag.Bool("clean", false, "Clean empty directories and exit")
@@ -95,6 +102,8 @@ func usage() {
 	fmt.Println("  TLS_KEY               - TLS key file path (optional)")
 	fmt.Println("  PERSIST_DIR           - Directory for persistent data (certificates and keys) (default: ./data)")
 	fmt.Println("  BUCKETS               - Comma-separated list of bucket names to sync (required)")
+	fmt.Println("  BROWSER               - Enable built-in browser under the `/-/browser/` (default: false)")
+	fmt.Println()
 	os.Exit(0)
 }
 
@@ -151,15 +160,44 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 	s3Server := s3.NewServer(db, client)
 	s3Server.SetBucketMap(bucketMap)
 
-	// Setup S3 API routes
-	r := mux.NewRouter()
-	s3Server.SetupS3Routes(r)
+	// Setup S3 API routes with auth
+	s3AuthConfig := loadAccessKeys()
+	s3Router := mux.NewRouter()
+	s3Server.SetupS3Routes(s3Router)
+	s3Handler := s3.AuthMiddleware(s3AuthConfig, s3Router)
 
-	// Apply authentication middleware
-	handler := s3.AuthMiddleware(loadAccessKeys(), r)
+	// Setup main router
+	mainRouter := mux.NewRouter()
+
+	// Add browser endpoint (outside of auth)
+	if *browser {
+		mainRouter.HandleFunc("/-/browser/{key:.*}", func(w http.ResponseWriter, req *http.Request) {
+			// Check if access key is missing and server requires auth
+			if s3AuthConfig.AccessKey != "" && req.URL.Query().Get("access_key") == "" {
+				// Redirect to add access key parameter
+				redirectURL := *req.URL
+				query := redirectURL.Query()
+				query.Set("access_key", s3AuthConfig.AccessKey)
+				redirectURL.RawQuery = query.Encode()
+
+				http.Redirect(w, req, redirectURL.String(), http.StatusTemporaryRedirect)
+				return
+			}
+
+			w.Header().Set("Content-Type", "text/html")
+			if os.Getenv("DEBUG") == "1" {
+				http.ServeFile(w, req, "web/index.html")
+			} else {
+				w.Write(browserHTML)
+			}
+		})
+	}
+
+	// Mount authenticated S3 routes
+	mainRouter.PathPrefix("/").Handler(s3Handler)
 
 	// Wrap with access logging middleware
-	handler = access_log.AccessLogMiddleware(handler)
+	handler := access_log.AccessLogMiddleware(mainRouter)
 
 	// Start server with or without TLS
 	if *httpOnly {
