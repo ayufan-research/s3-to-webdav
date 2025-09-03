@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -177,12 +178,12 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		if marker == "" {
 			marker = r.URL.Query().Get("start-after")
 		}
-		access_log.AddLogContext(r, fmt.Sprintf("list-objects-v2:%s", bucket))
+		access_log.AddLogContext(r, "list-objects-v2:%s", bucket)
 	} else {
 		// ListObjects (V1) parameters
 		prefix = r.URL.Query().Get("prefix")
 		marker = r.URL.Query().Get("marker")
-		access_log.AddLogContext(r, fmt.Sprintf("list-objects:%s", bucket))
+		access_log.AddLogContext(r, "list-objects:%s", bucket)
 	}
 
 	// Default limit to 1000, but allow customization via max-keys parameter
@@ -255,7 +256,7 @@ func (s *server) handleHeadBucket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
-	access_log.AddLogContext(r, fmt.Sprintf("head-bucket:%s", bucket))
+	access_log.AddLogContext(r, "head-bucket:%s", bucket)
 
 	// Validate bucket is allowed (buckets are required)
 	if !s.isBucketAllowed(bucket) {
@@ -272,7 +273,7 @@ func (s *server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 	bucket := vars["bucket"]
 	key := vars["key"]
 
-	access_log.AddLogContext(r, fmt.Sprintf("head:%s/%s", bucket, key))
+	access_log.AddLogContext(r, "head:%s/%s", bucket, key)
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -307,7 +308,7 @@ func (s *server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	bucket := vars["bucket"]
 	key := vars["key"]
 
-	access_log.AddLogContext(r, fmt.Sprintf("get:%s/%s", bucket, key))
+	access_log.AddLogContext(r, "get:%s/%s", bucket, key)
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -355,7 +356,8 @@ func (s *server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 	path := fs.PathFromBucketAndKey(bucket, key)
 
-	access_log.AddLogContext(r, fmt.Sprintf("put:%s/%s/%d", bucket, key, r.ContentLength))
+	access_log.AddLogContext(r, "put:%s/%s", bucket, key)
+	access_log.AddLogContext(r, "size:%d", r.ContentLength)
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -394,7 +396,14 @@ func (s *server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entryInfos := append(fs.BaseDirEntries(path), entryInfo)
-	s.db.InsertObjects(entryInfos...)
+
+	// Insert into DB
+	if err := s.db.InsertObjects(entryInfos...); err != nil {
+		http.Error(w, "Failed to insert object metadata", http.StatusInternalServerError)
+		log.Printf("Failed to insert object metadata: %v", err)
+		access_log.AddLogContext(r, "db-fail")
+		return
+	}
 
 	etag := generateETag(entryInfo.Path, entryInfo.Size, entryInfo.LastModified)
 	w.Header().Set("ETag", etag)
@@ -407,7 +416,7 @@ func (s *server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 	path := fs.PathFromBucketAndKey(bucket, key)
 
-	access_log.AddLogContext(r, fmt.Sprintf("delete:%s/%s", bucket, key))
+	access_log.AddLogContext(r, "delete:%s/%s", bucket, key)
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -416,10 +425,15 @@ func (s *server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove from database immediately
-	s.db.DeleteObject(path)
+	if _, err := s.db.DeleteObject(path); err != nil {
+		log.Printf("Failed to delete object from database: %v", err)
+		http.Error(w, "Failed to delete object metadata", http.StatusInternalServerError)
+		access_log.AddLogContext(r, "db-fail")
+		return
+	}
 
-	err := s.client.Remove(path)
-	if err != nil {
+	// Remove from the FS
+	if err := s.client.Remove(path); err != nil {
 		http.Error(w, "Failed to delete object", http.StatusInternalServerError)
 		access_log.AddLogContext(r, "remote-fail")
 		return
@@ -432,7 +446,7 @@ func (s *server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
 
-	access_log.AddLogContext(r, fmt.Sprintf("bulk-delete:%s", bucket))
+	access_log.AddLogContext(r, "bulk-delete:%s", bucket)
 
 	// Validate bucket is allowed
 	if !s.isBucketAllowed(bucket) {
@@ -463,11 +477,15 @@ func (s *server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 		path := fs.PathFromBucketAndKey(bucket, key)
 
 		// Remove from database
-		s.db.DeleteObject(path)
+		if _, err := s.db.DeleteObject(path); err != nil {
+			log.Printf("Failed to delete object from database: %v", err)
+			http.Error(w, "Failed to delete object metadata", http.StatusInternalServerError)
+			access_log.AddLogContext(r, "db-fail")
+			return
+		}
 
 		// Remove from WebDAV
-		err := s.client.Remove(path)
-		if err != nil {
+		if err := s.client.Remove(path); err != nil {
 			errors = append(errors, DeleteError{
 				Key:     key,
 				Code:    "InternalError",

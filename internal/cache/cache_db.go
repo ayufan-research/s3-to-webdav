@@ -105,7 +105,7 @@ func (c *cacheDB) InsertObjects(objects ...fs.EntryInfo) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(path) DO UPDATE SET
+		ON CONFLICT DO UPDATE SET
 			bucket = excluded.bucket, key = excluded.key, size = excluded.size,
 			is_dir = excluded.is_dir, updated_at = excluded.updated_at,
 			last_modified = MAX(excluded.last_modified, last_modified),

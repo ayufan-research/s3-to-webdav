@@ -128,12 +128,12 @@ func logApacheFormat(r *http.Request, statusCode int, responseSize int64, durati
 }
 
 // SetLogContext sets context information to be included in access logs via X-Log header
-func SetLogContext(r *http.Request, context string) {
-	r.Header.Set("X-Log", context)
+func SetLogContext(r *http.Request, context string, arg ...any) {
+	r.Header.Set("X-Log", fmt.Sprintf(context, arg...))
 }
 
-func AddLogContext(r *http.Request, context string) {
-	r.Header.Add("X-Log", context)
+func AddLogContext(r *http.Request, context string, arg ...any) {
+	r.Header.Add("X-Log", fmt.Sprintf(context, arg...))
 }
 
 func getClientIP(r *http.Request) string {
