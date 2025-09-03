@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +19,9 @@ import (
 	"s3-to-webdav/internal/s3"
 	"s3-to-webdav/internal/sync"
 )
+
+//go:embed web/index.html
+var browserHTML []byte
 
 var (
 	// WebDAV configuration
@@ -53,6 +57,9 @@ var (
 
 	// Read-only mode
 	readOnly = flag.Bool("read-only", getEnvOrDefault("READ_ONLY", "false") == "true", "Enable read-only mode (disables PUT, DELETE operations)")
+
+	// Browser mode
+	browser = flag.Bool("browser", getEnvOrDefault("BROWSER", "false") == "true", "Enable built-in browser")
 
 	// Maintenance commands
 	clean  = flag.Bool("clean", false, "Clean empty directories and exit")
@@ -99,6 +106,7 @@ func usage() {
 	fmt.Println("  PERSIST_DIR           - Directory for persistent data (certificates and keys) (default: ./data)")
 	fmt.Println("  BUCKETS               - Comma-separated list of bucket names to sync (required)")
 	fmt.Println("  READ_ONLY             - Enable read-only mode (disables PUT, DELETE operations) (default: false)")
+	fmt.Println("  BROWSER               - Enable built-in browser under the `/-/browser/` (default: false)")
 	fmt.Println()
 	os.Exit(0)
 }
@@ -156,18 +164,57 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 	s3Server := s3.NewServer(db, client)
 	s3Server.SetBucketMap(bucketMap)
 
+	s3AuthConfig := loadAccessKeys()
+
 	// Setup S3 API routes with auth
-	router := mux.NewRouter()
-	s3Server.SetupReadRoutes(router)
+	s3Router := mux.NewRouter()
+	s3Server.SetupReadRoutes(s3Router)
 	if !*readOnly {
-		s3Server.SetupWriteRoutes(router)
+		s3Server.SetupWriteRoutes(s3Router)
 	} else {
 		log.Printf("Read-Only: Write operations are disabled")
 	}
-	handler := s3.AuthMiddleware(loadAccessKeys(), router)
+	s3Handler := s3.AuthMiddleware(s3AuthConfig, s3Router)
+
+	// Setup main router
+	mainRouter := mux.NewRouter()
+
+	// Add browser endpoint (outside of auth)
+	if *browser {
+		mainRouter.HandleFunc("/-/browser/{key:.*}", func(w http.ResponseWriter, req *http.Request) {
+			query := req.URL.Query()
+
+			// Check if access key is missing and server requires auth
+			if s3AuthConfig.AccessKey != "" && query.Get("access_key") == "" {
+				query.Set("access_key", s3AuthConfig.AccessKey)
+			}
+
+			// Check if read_only parameter is missing when server is in read-only mode
+			if *readOnly && query.Get("read_only") == "" {
+				query.Set("read_only", "true")
+			}
+
+			if req.URL.Query().Encode() != query.Encode() {
+				redirectURL := *req.URL
+				redirectURL.RawQuery = query.Encode()
+				http.Redirect(w, req, redirectURL.String(), http.StatusTemporaryRedirect)
+				return
+			}
+
+			w.Header().Set("Content-Type", "text/html")
+			if os.Getenv("DEBUG") == "1" {
+				http.ServeFile(w, req, "web/index.html")
+			} else {
+				w.Write(browserHTML)
+			}
+		})
+	}
+
+	// Mount authenticated S3 routes
+	mainRouter.PathPrefix("/").Handler(s3Handler)
 
 	// Wrap with access logging middleware
-	handler = access_log.AccessLogMiddleware(handler)
+	handler := access_log.AccessLogMiddleware(mainRouter)
 
 	// Start server with or without TLS
 	if *httpOnly {
