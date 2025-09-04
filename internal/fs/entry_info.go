@@ -42,6 +42,9 @@ func BaseDirEntries(path string) []EntryInfo {
 
 	for {
 		path = filepath.Dir(path)
+		if path == "." || path == "/" {
+			break
+		}
 		bucket, key, ok := BucketAndKeyFromPath(path)
 		if !ok {
 			break

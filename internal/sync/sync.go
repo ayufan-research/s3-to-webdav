@@ -64,7 +64,7 @@ func (ws *Sync) Clean(bucket string) error {
 					rescanned++
 				}
 			} else {
-				if err := ws.client.Remove(dir.Path); err == nil {
+				if err := ws.client.Remove(dir.Path + "/"); err == nil {
 					ws.db.DeleteDir(dir.Path)
 					removed++
 				} else {
