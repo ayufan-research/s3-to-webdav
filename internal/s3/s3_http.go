@@ -473,7 +473,7 @@ func (s *server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove from database immediately
-	if _, err := s.db.DeleteObject(path); err != nil {
+	if _, err := s.db.DeleteObject(bucket, key); err != nil {
 		log.Printf("Failed to delete object from database: %v", err)
 		http.Error(w, "Failed to delete object metadata", http.StatusInternalServerError)
 		access_log.AddLogContext(r, "db-fail")
@@ -525,7 +525,7 @@ func (s *server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 		path := fs.PathFromBucketAndKey(bucket, key)
 
 		// Remove from database
-		if _, err := s.db.DeleteObject(path); err != nil {
+		if _, err := s.db.DeleteObject(bucket, key); err != nil {
 			log.Printf("Failed to delete object from database: %v", err)
 			http.Error(w, "Failed to delete object metadata", http.StatusInternalServerError)
 			access_log.AddLogContext(r, "db-fail")

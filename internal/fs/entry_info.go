@@ -15,7 +15,7 @@ type EntryInfo struct {
 	Processed    bool
 }
 
-// BucketAndKeyFromPath extracts bucketi and key from path
+// BucketAndKeyFromPath extracts bucket and key from path
 func BucketAndKeyFromPath(path string) (string, string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -29,12 +29,12 @@ func BucketAndKeyFromPath(path string) (string, string, bool) {
 // PathFromBucketAndKey creates path from bucket and key
 func PathFromBucketAndKey(bucket, key string) string {
 	if bucket == "" {
-		return "/"
+		return ""
 	}
 	if key == "" {
-		return "/" + bucket
+		return bucket
 	}
-	return "/" + bucket + "/" + key
+	return bucket + "/" + key
 }
 
 func BaseDirEntries(path string) []EntryInfo {

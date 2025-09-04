@@ -275,8 +275,8 @@ func (c *cacheDB) execSql(query string, args ...any) (int64, error) {
 	return rowsAffected, err
 }
 
-func (c *cacheDB) DeleteObject(path string) (int64, error) {
-	return c.execSql("DELETE FROM entries WHERE path = ?", path)
+func (c *cacheDB) DeleteObject(bucket, key string) (int64, error) {
+	return c.execSql("DELETE FROM entries WHERE bucket = ? AND key = ?", bucket, key)
 }
 
 func (c *cacheDB) DeleteDir(path string) (int64, error) {
