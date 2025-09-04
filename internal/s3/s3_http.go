@@ -2,8 +2,10 @@ package s3
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -400,8 +402,24 @@ func (s *server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.client.WriteStream(path, r.Body, r.ContentLength, 0644)
-	if err != nil {
+	// Check for SHA256 content verification
+	var bodyReader io.Reader = r.Body
+
+	if expectedSHA256 := r.Header.Get("X-Amz-Content-Sha256"); expectedSHA256 != "" && expectedSHA256 != "UNSIGNED-PAYLOAD" {
+		bodyReader = newHashVerifier(r.Body, sha256.New(), expectedSHA256)
+	}
+
+	err := s.client.WriteStream(path, bodyReader, r.ContentLength, 0644)
+	if errors.Is(err, ErrBadDigest) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+	<Code>BadDigest</Code>
+	<Message>The Content-SHA256 you specified did not match what we received.</Message>
+</Error>`))
+		access_log.AddLogContext(r, "sha256-fail")
+		return
+	} else if err != nil {
 		http.Error(w, "Failed to upload object", http.StatusInternalServerError)
 		access_log.AddLogContext(r, "remote-fail")
 		return
