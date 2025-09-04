@@ -593,7 +593,7 @@
             return authorizationHeader;
         }
 
-        async function makeS3Request(path, method = 'GET', body = null, headers = {}) {
+        async function makeS3Request(path, method = 'GET', body = null, headers = {}, options = {}) {
             saveCredentials();
 
             const url = credentials.endpoint + path;
@@ -605,7 +605,7 @@
 
             if (credentials.accessKey && credentials.secretKey) {
                 try {
-                    const payloadHash256 = body ? await sha256(body || '') : 'UNSIGNED-PAYLOAD';
+                    const payloadHash256 = options.skipHash ? 'UNSIGNED-PAYLOAD' : await sha256(body || '');
                     const authHeader = await signRequest(method, url, defaultHeaders, payloadHash256, credentials);
                     defaultHeaders['Authorization'] = authHeader;
                     defaultHeaders['X-Amz-Content-Sha256'] = payloadHash256;
@@ -881,10 +881,13 @@
             const objectKey = currentPath + file.name;
             showMessage(`Uploading: ${file.name}...`, 'info');
 
+            // For files >= 10MB, skip SHA256 hash generation
+            const skipHash = file.size >= 10 * 1024 * 1024;
+
             const response = await makeS3Request(`/${selectedBucket}/${objectKey}`, 'PUT', file, {
                 'Content-Type': file.type || 'application/octet-stream',
                 'Content-Length': file.size.toString()
-            });
+            }, { skipHash });
 
             if (!response) return;
 
