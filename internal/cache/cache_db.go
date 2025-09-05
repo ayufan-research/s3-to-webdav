@@ -3,6 +3,7 @@ package cache
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +55,7 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	PRAGMA temp_store = memory;
 	PRAGMA mmap_size = 268435456;
 	PRAGMA foreign_keys = ON;
+	PRAGMA optimize;
 	`
 	if _, err := db.Exec(pragmas); err != nil {
 		return nil, fmt.Errorf("failed to set pragmas: %v", err)
@@ -77,8 +79,10 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	-- Indexes for performance
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_path ON entries(path);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_bucket_key ON entries(bucket, key);
+	CREATE INDEX IF NOT EXISTS idx_entries_bucket_key_depth ON entries(bucket, LENGTH(key) - LENGTH(REPLACE(key, '/', '')), key);
 	CREATE INDEX IF NOT EXISTS idx_entries_bucket_processed_isdir ON entries(bucket, processed, is_dir, path);
 	CREATE INDEX IF NOT EXISTS idx_entries_bucket_dirname ON entries (bucket, rtrim(path, replace(path, '/', '')));
+	ANALYZE;
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -202,8 +206,9 @@ func (c *cacheDB) ListObjects(bucket, prefix, marker string, dirOnly bool, limit
 	}
 
 	if dirOnly {
-		query += " AND key NOT LIKE ? AND key <> ''"
-		args = append(args, prefix+"%/%")
+		query += " AND key <> ''"
+		query += " AND LENGTH(key) - LENGTH(REPLACE(key, '/', '')) = ?"
+		args = append(args, strings.Count(prefix, "/"))
 	} else {
 		query += " AND is_dir = 0"
 	}
