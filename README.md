@@ -44,10 +44,11 @@ HTTP_PORT="8080"               # HTTPS server port
 WEBDAV_INSECURE="false"        # Allow self-signed WebDAV certificates
 AWS_ACCESS_KEY_ID="key"        # S3 access key (optional - auto-generated if not provided)
 AWS_SECRET_ACCESS_KEY="secret" # S3 secret key (optional - auto-generated if not provided)
-AWS_ACCESS_INSECURE="false"    # Allow insecure access without authentication
+AWS_ACCESS_INSECURE="true"    # Allow insecure access without authentication
 TLS_CERT="cert.pem"           # Custom TLS certificate
 TLS_KEY="key.pem"             # Custom TLS private key
 PERSIST_DIR="./data"          # Directory for persistent data (certificates and S3 keys)
+READ_ONLY="true"              # Enable read-only mode (disables PUT, DELETE operations)
 ```
 
 ### Authentication

@@ -570,3 +570,20 @@ func (s *server) SetupS3Routes(r *mux.Router) {
 	r.HandleFunc("/{bucket}/{key:.*}", s.handleHeadObject).Methods("HEAD")
 	r.HandleFunc("/{bucket}/{key:.*}", s.handleDeleteObject).Methods("DELETE")
 }
+
+func (s *server) SetupReadRoutes(r *mux.Router) {
+	r.HandleFunc("/", s.handleListBuckets).Methods("GET")
+	r.HandleFunc("/{bucket}", s.handleListObjects).Methods("GET")
+	r.HandleFunc("/{bucket}/", s.handleListObjects).Methods("GET")
+	r.HandleFunc("/{bucket}", s.handleHeadBucket).Methods("HEAD")
+	r.HandleFunc("/{bucket}/", s.handleHeadBucket).Methods("HEAD")
+	r.HandleFunc("/{bucket}/{key:.*}", s.handleGetObject).Methods("GET")
+	r.HandleFunc("/{bucket}/{key:.*}", s.handleHeadObject).Methods("HEAD")
+}
+
+func (s *server) SetupWriteRoutes(r *mux.Router) {
+	r.HandleFunc("/{bucket}/", s.handleBulkDelete).Methods("POST").Queries("delete", "")
+	r.HandleFunc("/{bucket}", s.handleBulkDelete).Methods("POST").Queries("delete", "")
+	r.HandleFunc("/{bucket}/{key:.*}", s.handlePutObject).Methods("PUT")
+	r.HandleFunc("/{bucket}/{key:.*}", s.handleDeleteObject).Methods("DELETE")
+}
