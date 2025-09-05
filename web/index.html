@@ -419,6 +419,9 @@
         let credentials = { endpoint: `${window.location.protocol}//${window.location.host}` };
         let selectedBucket = '';
         let currentPath = '';
+        let currentObjects = [];
+        let nextMarker = '';
+        let isTruncated = false;
 
         function initConfig() {
             loadCredentials();
@@ -681,22 +684,35 @@
             loadBucketContents();
         }
 
-        async function loadBucketContents(path = '') {
+        async function loadBucketContents(path = '', loadMore = false) {
             if (!selectedBucket) return;
 
-            currentPath = path;
-            updateBreadcrumb(path);
-            updateUrl(selectedBucket, path);
+            if (!loadMore) {
+                currentPath = path;
+                currentObjects = [];
+                nextMarker = '';
+                isTruncated = false;
+                updateBreadcrumb(path);
+                updateUrl(selectedBucket, path);
+            }
 
             // Show Go to Path button when bucket is selected
             document.getElementById('goToPathBtn').style.display = 'block';
 
             const contentArea = document.getElementById('contentArea');
-            contentArea.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="loading"></div></div>';
+            if (!loadMore) {
+                contentArea.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="loading"></div></div>';
+            }
 
             // Use prefix parameter and delimiter for proper folder navigation
             const prefix = path || '';
-            const response = await makeS3Request(`/${selectedBucket}?prefix=${prefix}&delimiter=/`);
+            let queryParams = `prefix=${prefix}&delimiter=/&max-keys=100`;
+
+            if (loadMore && nextMarker) {
+                queryParams += `&marker=${encodeURIComponent(nextMarker)}`;
+            }
+
+            const response = await makeS3Request(`/${selectedBucket}?${queryParams}`);
             if (!response) {
                 contentArea.innerHTML = '<div class="empty-state"><div class="icon">❌</div><p>Failed to load contents</p></div>';
                 return;
@@ -705,6 +721,10 @@
             const text = await response.text();
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(text, 'text/xml');
+
+            // Check if results are truncated
+            const truncatedElement = xmlDoc.querySelector('IsTruncated');
+            isTruncated = truncatedElement ? truncatedElement.textContent.toLowerCase() === 'true' : false;
 
             // Get folders from CommonPrefixes
             const folders = Array.from(xmlDoc.querySelectorAll('CommonPrefixes Prefix')).map(prefix => ({
@@ -724,21 +744,44 @@
                 displayName: content.querySelector('Key').textContent.split('/').pop()
             }));
 
-            // Combine and sort
-            const allItems = [...folders, ...files].sort((a, b) => {
+            // Set next marker for pagination
+            const nextMarkerElement = xmlDoc.querySelector('NextMarker');
+            if (nextMarkerElement && nextMarkerElement.textContent) {
+                nextMarker = nextMarkerElement.textContent;
+            } else if (isTruncated) {
+                // If no explicit NextMarker, find the last key from the original S3 response
+                // We need to use the last item from the combined results before sorting
+                const allResponseItems = [...folders, ...files];
+                if (allResponseItems.length > 0) {
+                    // Find the lexicographically last key
+                    const sortedByKey = allResponseItems.sort((a, b) => a.key.localeCompare(b.key));
+                    nextMarker = sortedByKey[sortedByKey.length - 1].key;
+                }
+            } else {
+                nextMarker = '';
+            }
+
+            // Combine and sort items for display (folders first, then files)
+            const newItems = [...folders, ...files].sort((a, b) => {
                 if (a.isFolder && !b.isFolder) return -1;
                 if (!a.isFolder && b.isFolder) return 1;
                 return a.displayName.localeCompare(b.displayName);
             });
 
-            renderFileList(allItems);
+            if (loadMore) {
+                currentObjects = [...currentObjects, ...newItems];
+            } else {
+                currentObjects = newItems;
+            }
+
+            renderFileList(currentObjects, loadMore);
         }
 
 
-        function renderFileList(objects) {
+        function renderFileList(objects, isLoadMore = false) {
             const contentArea = document.getElementById('contentArea');
 
-            if (objects.length === 0) {
+            if (objects.length === 0 && !isLoadMore) {
                 const pathDisplay = currentPath ? `"${currentPath}"` : 'root';
                 contentArea.innerHTML = `
                     <div class="empty-state">
@@ -750,10 +793,27 @@
                 return;
             }
 
-            const fileListDiv = document.createElement('div');
-            fileListDiv.className = 'file-list';
+            let fileListDiv;
+            if (isLoadMore) {
+                // Find existing file list and remove load more button if present
+                fileListDiv = contentArea.querySelector('.file-list');
+                const loadMoreBtn = contentArea.querySelector('.load-more-btn');
+                if (loadMoreBtn) {
+                    loadMoreBtn.remove();
+                }
+            } else {
+                // Create new file list
+                fileListDiv = document.createElement('div');
+                fileListDiv.className = 'file-list';
+                contentArea.innerHTML = '';
+                contentArea.appendChild(fileListDiv);
+            }
 
-            objects.forEach(obj => {
+            // Add new items to the file list
+            const startIndex = isLoadMore ? fileListDiv.children.length : 0;
+            const newItems = isLoadMore ? objects.slice(startIndex) : objects;
+
+            newItems.forEach(obj => {
                 const fileItem = document.createElement('div');
                 fileItem.className = obj.isFolder ? 'file-item folder' : 'file-item';
 
@@ -785,9 +845,31 @@
                 fileListDiv.appendChild(fileItem);
             });
 
-            contentArea.innerHTML = '';
-            contentArea.appendChild(fileListDiv);
-            contentArea.innerHTML += getUploadZone();
+            // Add Load More button if results are truncated
+            if (isTruncated) {
+                const loadMoreBtn = document.createElement('div');
+                loadMoreBtn.className = 'load-more-btn';
+                loadMoreBtn.style.cssText = 'text-align: center; padding: 20px; border-top: 1px solid #e5e7eb;';
+                loadMoreBtn.innerHTML = `
+                    <button class="btn" onclick="loadMoreObjects()" id="loadMoreButton">
+                        📄 Load More (showing ${objects.length} items)
+                    </button>
+                `;
+                contentArea.appendChild(loadMoreBtn);
+            }
+
+            // Add upload zone if not loading more
+            if (!isLoadMore) {
+                contentArea.innerHTML += getUploadZone();
+            } else {
+                // Make sure upload zone is at the end
+                const uploadZone = contentArea.querySelector('.upload-zone');
+                if (uploadZone) {
+                    contentArea.appendChild(uploadZone);
+                } else {
+                    contentArea.innerHTML += getUploadZone();
+                }
+            }
         }
 
         function getUploadZone() {
@@ -918,6 +1000,22 @@
 
         function navigateToFolder(folderKey) {
             loadBucketContents(folderKey);
+        }
+
+        async function loadMoreObjects() {
+            if (!isTruncated || !selectedBucket) return;
+
+            const loadMoreButton = document.getElementById('loadMoreButton');
+            if (loadMoreButton) {
+                loadMoreButton.innerHTML = '<div class="loading"></div> Loading...';
+                loadMoreButton.disabled = true;
+            }
+
+            await loadBucketContents(currentPath, true);
+
+            if (loadMoreButton) {
+                loadMoreButton.disabled = false;
+            }
         }
 
         function formatBytes(bytes) {
