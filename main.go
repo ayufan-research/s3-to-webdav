@@ -51,6 +51,9 @@ var (
 	// Help
 	help = flag.Bool("help", false, "Show help message")
 
+	// Read-only mode
+	readOnly = flag.Bool("read-only", getEnvOrDefault("READ_ONLY", "false") == "true", "Enable read-only mode (disables PUT, DELETE operations)")
+
 	// Maintenance commands
 	clean  = flag.Bool("clean", false, "Clean empty directories and exit")
 	scan   = flag.Bool("scan", true, "Scan on startup")
@@ -95,6 +98,8 @@ func usage() {
 	fmt.Println("  TLS_KEY               - TLS key file path (optional)")
 	fmt.Println("  PERSIST_DIR           - Directory for persistent data (certificates and keys) (default: ./data)")
 	fmt.Println("  BUCKETS               - Comma-separated list of bucket names to sync (required)")
+	fmt.Println("  READ_ONLY             - Enable read-only mode (disables PUT, DELETE operations) (default: false)")
+	fmt.Println()
 	os.Exit(0)
 }
 
@@ -151,12 +156,15 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 	s3Server := s3.NewServer(db, client)
 	s3Server.SetBucketMap(bucketMap)
 
-	// Setup S3 API routes
-	r := mux.NewRouter()
-	s3Server.SetupS3Routes(r)
-
-	// Apply authentication middleware
-	handler := s3.AuthMiddleware(loadAccessKeys(), r)
+	// Setup S3 API routes with auth
+	router := mux.NewRouter()
+	s3Server.SetupReadRoutes(router)
+	if !*readOnly {
+		s3Server.SetupWriteRoutes(router)
+	} else {
+		log.Printf("Read-Only: Write operations are disabled")
+	}
+	handler := s3.AuthMiddleware(loadAccessKeys(), router)
 
 	// Wrap with access logging middleware
 	handler = access_log.AccessLogMiddleware(handler)
@@ -278,6 +286,9 @@ func main() {
 		runScan(client, db, bucketMap)
 	}
 	if *clean {
+		if *readOnly {
+			log.Fatalf("Cannot use -clean in read-only mode")
+		}
 		runClean(client, db, bucketMap)
 	}
 
