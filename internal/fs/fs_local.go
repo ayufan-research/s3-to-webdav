@@ -27,6 +27,10 @@ func NewLocalFs(rootPath string) (Fs, error) {
 	}, nil
 }
 
+func (fs *localFs) Close() error {
+	return nil
+}
+
 func (fs *localFs) getFullPath(path string) (string, error) {
 	fullPath := filepath.Join(fs.rootPath, filepath.Clean(path))
 
@@ -122,4 +126,44 @@ func (fs *localFs) Remove(path string) error {
 		return err
 	}
 	return os.Remove(fullPath)
+}
+
+func (fs *localFs) Tree(path string) ([]EntryInfo, error) {
+	var entries []EntryInfo
+
+	err := fs.treeWalk(path, func(relativePath string, info os.FileInfo) error {
+		entries = append(entries, EntryInfo{
+			Path:         relativePath,
+			Size:         info.Size(),
+			LastModified: info.ModTime().Unix(),
+			IsDir:        info.IsDir(),
+		})
+		return nil
+	})
+
+	return entries, err
+}
+
+func (fs *localFs) treeWalk(path string, fn func(string, os.FileInfo) error) error {
+	fullPath, err := fs.getFullPath(path)
+	if err != nil {
+		return err
+	}
+
+	return filepath.Walk(fullPath, func(walkPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relativePath, err := filepath.Rel(fs.rootPath, walkPath)
+		if err != nil {
+			return err
+		}
+
+		if relativePath == "." {
+			relativePath = ""
+		}
+
+		return fn(relativePath, info)
+	})
 }

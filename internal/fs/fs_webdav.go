@@ -2,6 +2,7 @@ package fs
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -37,6 +38,10 @@ func NewWebDAVFs(webdavURL, webdavUser, webdavPassword string, webdavInsecure bo
 	return &webdavFs{client: client}, nil
 }
 
+func (fs *webdavFs) Close() error {
+	return nil
+}
+
 func (fs *webdavFs) ReadDir(path string) ([]os.FileInfo, error) {
 	return fs.client.ReadDir(path)
 }
@@ -55,4 +60,8 @@ func (fs *webdavFs) WriteStream(path string, stream io.Reader, contentLength int
 
 func (fs *webdavFs) Remove(path string) error {
 	return fs.client.Remove(path)
+}
+
+func (fs *webdavFs) Tree(path string) ([]EntryInfo, error) {
+	return nil, errors.New("Tree operation not supported for WebDAV filesystem")
 }

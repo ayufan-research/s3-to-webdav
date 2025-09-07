@@ -1,4 +1,4 @@
-s3-to-webdav
+s3-to-*
 *.db*
 .env
 data/
