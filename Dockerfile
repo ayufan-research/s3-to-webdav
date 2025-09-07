@@ -8,7 +8,7 @@ RUN go mod download
 
 # Copy source code and build
 COPY . .
-RUN go build
+RUN go build -o s3-to-webdav ./cmd/s3-to-webdav
 RUN go build -o s3-to-sftp ./cmd/s3-to-sftp
 
 FROM alpine:latest

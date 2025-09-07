@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -18,10 +17,8 @@ import (
 	"s3-to-webdav/internal/helpers"
 	"s3-to-webdav/internal/s3"
 	"s3-to-webdav/internal/sync"
+	"s3-to-webdav/web"
 )
-
-//go:embed web/index.html
-var browserHTML []byte
 
 var (
 	// WebDAV configuration
@@ -205,7 +202,7 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 			if os.Getenv("DEBUG") == "1" {
 				http.ServeFile(w, req, "web/index.html")
 			} else {
-				w.Write(browserHTML)
+				w.Write(web.IndexHTML)
 			}
 		})
 	}

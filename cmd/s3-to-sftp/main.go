@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -19,9 +18,8 @@ import (
 	"s3-to-webdav/internal/fs"
 	"s3-to-webdav/internal/helpers"
 	"s3-to-webdav/internal/s3"
+	"s3-to-webdav/web"
 )
-
-var browserHTML []byte
 
 var (
 	// SFTP configuration
@@ -210,7 +208,7 @@ func runServe(db cache.Cache, client fs.Fs, bucketMap map[string]interface{}) {
 			}
 
 			w.Header().Set("Content-Type", "text/html")
-			http.ServeFile(w, req, "web/index.html")
+			w.Write(web.IndexHTML)
 		})
 	}
 
