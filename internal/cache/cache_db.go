@@ -388,3 +388,15 @@ func (c *cacheDB) SetProcessed(prefix string, recursive, processed bool) (int64,
 	}
 	return c.execSql("UPDATE entries SET processed = ? WHERE processed <> ? AND path = ?", processed, processed, prefix)
 }
+
+func (c *cacheDB) DeleteDangling(prefix string, recursive bool) (int64, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return 0, fmt.Errorf("prefix cannot start with '/': %s", prefix)
+	}
+
+	if strings.HasSuffix(prefix, "/") && recursive {
+		return c.execSql(`DELETE FROM entries WHERE path LIKE ? AND processed = 0`, prefix+"%")
+	}
+
+	return c.execSql(`DELETE FROM entries WHERE path = ? AND processed = 0`, prefix)
+}

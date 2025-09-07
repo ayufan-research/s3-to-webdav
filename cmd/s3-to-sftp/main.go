@@ -61,7 +61,9 @@ var (
 	browser = flag.Bool("browser", getEnvOrDefault("BROWSER", "false") == "true", "Enable built-in browser")
 
 	// Maintenance commands
-	clean = flag.Bool("clean", false, "Clean empty directories after initial scan")
+	scan  = flag.Bool("scan", true, "Scan and sync existing files from SFTP to the database")
+	clean = flag.Bool("clean", false, "Clean empty directories after scan")
+	serve = flag.Bool("serve", true, "Run the server after scan")
 )
 
 func getEnvOrDefault(envKey, defaultValue string) string {
@@ -246,6 +248,10 @@ func runScan(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
 			continue
 		}
 
+		for i := range entries {
+			entries[i].Processed = true
+		}
+
 		if *clean && len(entries) > 0 {
 			log.Printf("Scan: Cleaning empty directories in bucket %s...", bucket)
 
@@ -275,8 +281,19 @@ func runScan(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
 			}
 		}
 
+		if _, err = db.SetProcessed(bucket+"/", true, false); err != nil {
+			log.Printf("Scan: Failed to mark existing entries as processed for bucket %s: %v", bucket, err)
+			continue
+		}
+
 		if err = db.Insert(entries...); err != nil {
 			log.Printf("Scan: Failed to insert existing entries for bucket %s: %v", bucket, err)
+			continue
+		}
+
+		dangling, err := db.DeleteDangling(bucket+"/", true)
+		if err != nil {
+			log.Printf("Scan: Failed to delete dangling entries for bucket %s: %v", bucket, err)
 			continue
 		}
 
@@ -286,9 +303,10 @@ func runScan(client fs.Fs, db cache.Cache, bucketMap map[string]interface{}) {
 			continue
 		}
 
-		log.Printf("Scan: Bucket %s: %d entries, %d processed, total size %d MiB",
-			bucket, len(entries), processed, totalSize/1024/1024)
+		log.Printf("Scan: Bucket %s: %d entries, %d processed, %d dangling, total size %d MiB",
+			bucket, len(entries), processed, dangling, totalSize/1024/1024)
 	}
+
 	log.Printf("Scan: Scan completed in %v.", time.Since(now))
 }
 
@@ -343,12 +361,17 @@ func main() {
 	log.Printf("Buckets: %v", getMapKeys(bucketMap))
 
 	// Create database cache
-	db, err := cache.NewCacheDB(":memory:")
+	db, err := cache.NewCacheDB(filepath.Join(*persistDir, "metadata3.db"))
 	if err != nil {
 		log.Fatalf("Failed to initialize database cache: %v", err)
 	}
 
 	// Perform sync
-	runScan(client, db, bucketMap)
-	runServe(db, client, bucketMap)
+	if *scan {
+		runScan(client, db, bucketMap)
+	}
+
+	if *serve {
+		runServe(db, client, bucketMap)
+	}
 }

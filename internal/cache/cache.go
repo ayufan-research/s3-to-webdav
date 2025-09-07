@@ -19,4 +19,5 @@ type Cache interface {
 	ListDanglingDirs(prefix string, limit int) ([]fs.EntryInfo, error)
 	DeleteDanglingFiles(prefix string) (int64, error)
 	SetProcessed(prefix string, recursive, processed bool) (int64, error)
+	DeleteDangling(prefix string, recursive bool) (int64, error)
 }
