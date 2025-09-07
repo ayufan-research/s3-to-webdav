@@ -875,6 +875,7 @@ func TestListAll(t *testing.T) {
 	for listType, url := range urls {
 		t.Run(fmt.Sprintf("Type%d", listType), func(t *testing.T) {
 			marker := ""
+			count := 0
 
 			for i := 0; i < 10; i++ {
 				req := httptest.NewRequest("GET", url+marker, nil)
@@ -891,7 +892,9 @@ func TestListAll(t *testing.T) {
 					require.NoError(t, err)
 					assert.Equal(t, "test-bucket", result.Name)
 					marker = result.NextContinuationToken
+					count += len(result.Contents)
 					if !result.IsTruncated {
+						require.Equal(t, len(testFiles), count, "Should have listed all files")
 						return
 					}
 				} else {
@@ -900,7 +903,9 @@ func TestListAll(t *testing.T) {
 					require.NoError(t, err)
 					assert.Equal(t, "test-bucket", result.Name)
 					marker = result.NextMarker
+					count += len(result.Contents)
 					if !result.IsTruncated {
+						require.Equal(t, len(testFiles), count, "Should have listed all files")
 						return
 					}
 				}
