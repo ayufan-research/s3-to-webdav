@@ -225,6 +225,7 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 
 	objects := make([]Object, 0, len(files))
 	commonPrefixes := make([]CommonPrefix, 0)
+	nextMarker := ""
 
 	for _, file := range files {
 		fileBucket, fileKey, ok := fs.BucketAndKeyFromPath(file.Path)
@@ -247,17 +248,15 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 			Size:         file.Size,
 			StorageClass: "STANDARD",
 		})
+		if truncated {
+			nextMarker = file.Path
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
 
 	if isV2 {
 		// ListObjectsV2 response
-		var nextContinuationToken string
-		if truncated && len(objects) > 0 {
-			nextContinuationToken = objects[len(objects)-1].Key
-		}
-
 		resultV2 := ListBucketResultV2{
 			Name:                  bucket,
 			Prefix:                prefix,
@@ -266,7 +265,7 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 			Delimiter:             delimiter,
 			KeyCount:              len(objects),
 			ContinuationToken:     r.URL.Query().Get("continuation-token"),
-			NextContinuationToken: nextContinuationToken,
+			NextContinuationToken: nextMarker,
 			StartAfter:            r.URL.Query().Get("start-after"),
 			Contents:              objects,
 			CommonPrefixes:        commonPrefixes,
@@ -274,11 +273,6 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		xml.NewEncoder(w).Encode(resultV2)
 	} else {
 		// ListObjects (V1) response
-		var nextMarker string
-		if truncated && len(objects) > 0 {
-			nextMarker = objects[len(objects)-1].Key
-		}
-
 		result := ListBucketResult{
 			Name:           bucket,
 			Prefix:         prefix,

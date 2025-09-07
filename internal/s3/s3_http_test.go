@@ -851,3 +851,62 @@ func TestHandleListObjects(t *testing.T) {
 		})
 	}
 }
+
+func TestListAll(t *testing.T) {
+	s, db, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	testFiles := []fs.EntryInfo{
+		{Path: "test-bucket/file1.txt", Size: 100, LastModified: time.Now().Unix(), IsDir: false, Processed: true},
+		{Path: "test-bucket/file2.txt", Size: 200, LastModified: time.Now().Unix(), IsDir: false, Processed: true},
+		{Path: "test-bucket/prefix/file3.txt", Size: 300, LastModified: time.Now().Unix(), IsDir: false, Processed: true},
+		{Path: "test-bucket/prefix/file4.txt", Size: 400, LastModified: time.Now().Unix(), IsDir: false, Processed: true},
+		{Path: "test-bucket/prefix/subdir/file5.txt", Size: 500, LastModified: time.Now().Unix(), IsDir: false, Processed: true},
+	}
+
+	err := db.Insert(testFiles...)
+	require.NoError(t, err)
+
+	urls := map[int]string{
+		1: "/test-bucket?max-keys=1&marker=",
+		2: "/test-bucket?max-keys=1&list-type=2&continuation-token=",
+	}
+
+	for listType, url := range urls {
+		t.Run(fmt.Sprintf("Type%d", listType), func(t *testing.T) {
+			marker := ""
+
+			for i := 0; i < 10; i++ {
+				req := httptest.NewRequest("GET", url+marker, nil)
+				req = mux.SetURLVars(req, map[string]string{"bucket": "test-bucket"})
+				w := httptest.NewRecorder()
+
+				s.handleListObjects(w, req)
+				require.Equal(t, http.StatusOK, w.Code)
+				require.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+
+				if listType == 2 {
+					var result ListBucketResultV2
+					err := xml.Unmarshal(w.Body.Bytes(), &result)
+					require.NoError(t, err)
+					assert.Equal(t, "test-bucket", result.Name)
+					marker = result.NextContinuationToken
+					if !result.IsTruncated {
+						return
+					}
+				} else {
+					var result ListBucketResult
+					err := xml.Unmarshal(w.Body.Bytes(), &result)
+					require.NoError(t, err)
+					assert.Equal(t, "test-bucket", result.Name)
+					marker = result.NextMarker
+					if !result.IsTruncated {
+						return
+					}
+				}
+			}
+
+			t.Fatal("ListAll did not complete within expected iterations")
+		})
+	}
+}
