@@ -7,8 +7,6 @@ import (
 
 type EntryInfo struct {
 	Path         string
-	Bucket       string
-	Key          string
 	Size         int64
 	LastModified int64
 	IsDir        bool
@@ -45,15 +43,9 @@ func BaseDirEntries(path string) []EntryInfo {
 		if path == "." || path == "/" {
 			break
 		}
-		bucket, key, ok := BucketAndKeyFromPath(path)
-		if !ok {
-			break
-		}
 
 		entryInfos = append(entryInfos, EntryInfo{
-			Path:         path,
-			Bucket:       bucket,
-			Key:          key,
+			Path:         path + "/",
 			Size:         0,
 			LastModified: 0,
 			IsDir:        true,

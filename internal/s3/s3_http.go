@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -196,6 +197,9 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		marker = r.URL.Query().Get("continuation-token")
 		if marker == "" {
 			marker = r.URL.Query().Get("start-after")
+			if marker != "" {
+				marker = filepath.Join(bucket, marker)
+			}
 		}
 		access_log.AddLogContext(r, "list-objects-v2:%s", bucket)
 	} else {
@@ -213,7 +217,7 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	files, truncated, err := s.db.ListObjects(bucket, prefix, marker, delimiter == "/", limit)
+	files, truncated, err := s.db.List(filepath.Join(bucket, prefix)+"/", marker, delimiter == "/", limit)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -223,16 +227,21 @@ func (s *server) handleListObjects(w http.ResponseWriter, r *http.Request) {
 	commonPrefixes := make([]CommonPrefix, 0)
 
 	for _, file := range files {
+		fileBucket, fileKey, ok := fs.BucketAndKeyFromPath(file.Path)
+		if !ok || fileBucket != bucket {
+			log.Printf("ListObjects: Failed to parse path %s", file.Path)
+			continue
+		}
 		if file.IsDir {
 			commonPrefixes = append(commonPrefixes, CommonPrefix{
-				Prefix: file.Key + "/",
+				Prefix: fileKey + "/",
 			})
 			continue
 		}
 
 		etag := generateETag(file.Path, file.Size, file.LastModified)
 		objects = append(objects, Object{
-			Key:          file.Key,
+			Key:          fileKey,
 			LastModified: time.Unix(file.LastModified, 0).Format(time.RFC3339),
 			ETag:         etag,
 			Size:         file.Size,
@@ -313,7 +322,8 @@ func (s *server) handleHeadObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryInfo, err := s.db.StatObject(bucket, key)
+	path := fs.PathFromBucketAndKey(bucket, key)
+	entryInfo, err := s.db.Stat(path)
 	if err != nil || entryInfo.IsDir {
 		http.Error(w, "Object not found", http.StatusNotFound)
 		return
@@ -348,7 +358,8 @@ func (s *server) handleGetObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryInfo, err := s.db.StatObject(bucket, key)
+	path := fs.PathFromBucketAndKey(bucket, key)
+	entryInfo, err := s.db.Stat(path)
 	if err != nil || entryInfo.IsDir {
 		http.Error(w, "Object not found", http.StatusNotFound)
 		access_log.AddLogContext(r, "local-fail")
@@ -435,8 +446,6 @@ func (s *server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 
 	entryInfo := fs.EntryInfo{
 		Path:         path,
-		Bucket:       bucket,
-		Key:          key,
 		Size:         stat.Size(),
 		LastModified: stat.ModTime().Unix(),
 		IsDir:        stat.IsDir(),
@@ -446,7 +455,7 @@ func (s *server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 	entryInfos := append(fs.BaseDirEntries(path), entryInfo)
 
 	// Insert into DB
-	if err := s.db.InsertObjects(entryInfos...); err != nil {
+	if err := s.db.Insert(entryInfos...); err != nil {
 		http.Error(w, "Failed to insert object metadata", http.StatusInternalServerError)
 		log.Printf("Failed to insert object metadata: %v", err)
 		access_log.AddLogContext(r, "db-fail")
@@ -473,7 +482,7 @@ func (s *server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove from database immediately
-	if _, err := s.db.DeleteObject(bucket, key); err != nil {
+	if err := s.db.Delete(path); err != nil {
 		log.Printf("Failed to delete object from database: %v", err)
 		http.Error(w, "Failed to delete object metadata", http.StatusInternalServerError)
 		access_log.AddLogContext(r, "db-fail")
@@ -525,7 +534,7 @@ func (s *server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 		path := fs.PathFromBucketAndKey(bucket, key)
 
 		// Remove from database
-		if _, err := s.db.DeleteObject(bucket, key); err != nil {
+		if err := s.db.Delete(path); err != nil {
 			log.Printf("Failed to delete object from database: %v", err)
 			http.Error(w, "Failed to delete object metadata", http.StatusInternalServerError)
 			access_log.AddLogContext(r, "db-fail")
@@ -554,21 +563,6 @@ func (s *server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/xml")
 	xml.NewEncoder(w).Encode(response)
-}
-
-// SetupS3Routes sets up all S3 API routes with the given router
-func (s *server) SetupS3Routes(r *mux.Router) {
-	r.HandleFunc("/", s.handleListBuckets).Methods("GET")
-	r.HandleFunc("/{bucket}", s.handleListObjects).Methods("GET")
-	r.HandleFunc("/{bucket}/", s.handleListObjects).Methods("GET")
-	r.HandleFunc("/{bucket}", s.handleHeadBucket).Methods("HEAD")
-	r.HandleFunc("/{bucket}/", s.handleHeadBucket).Methods("HEAD")
-	r.HandleFunc("/{bucket}/", s.handleBulkDelete).Methods("POST").Queries("delete", "")
-	r.HandleFunc("/{bucket}", s.handleBulkDelete).Methods("POST").Queries("delete", "")
-	r.HandleFunc("/{bucket}/{key:.*}", s.handleGetObject).Methods("GET")
-	r.HandleFunc("/{bucket}/{key:.*}", s.handlePutObject).Methods("PUT")
-	r.HandleFunc("/{bucket}/{key:.*}", s.handleHeadObject).Methods("HEAD")
-	r.HandleFunc("/{bucket}/{key:.*}", s.handleDeleteObject).Methods("DELETE")
 }
 
 func (s *server) SetupReadRoutes(r *mux.Router) {

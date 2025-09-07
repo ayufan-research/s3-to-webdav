@@ -39,7 +39,7 @@ func (ws *Sync) Clean(bucket string) error {
 	errors := 0
 
 	for {
-		dirs, err := ws.db.ListEmptyDirs(bucket, 50)
+		dirs, err := ws.db.ListDanglingDirs(bucket+"/", 50)
 		if err != nil {
 			return fmt.Errorf("failed to list empty dirs: %v", err)
 		} else if len(dirs) == 0 {
@@ -50,14 +50,17 @@ func (ws *Sync) Clean(bucket string) error {
 			infos, err := ws.client.ReadDir(dir.Path)
 
 			if fs.IsNotFound(err) {
-				ws.db.DeleteDir(dir.Path)
+				if err := ws.db.Delete(dir.Path); err != nil {
+					log.Printf("Clean: Failed to delete missing dir %s from database: %v", dir.Path, err)
+					errors++
+				}
 				missing++
 			} else if err != nil && !os.IsNotExist(err) {
 				log.Printf("Clean: Failed to read dir %s: %v", dir.Path, err)
 				errors++
 			} else if len(infos) > 0 {
 				// Has files, re-process directory
-				if err := ws.db.SetProcessed(dir.Path, false); err != nil {
+				if _, err := ws.db.SetProcessed(dir.Path, false, false); err != nil {
 					log.Printf("Clean: Failed to mark dir %s as unprocessed: %v", dir.Path, err)
 					errors++
 				} else {
@@ -65,7 +68,7 @@ func (ws *Sync) Clean(bucket string) error {
 				}
 			} else {
 				if err := ws.client.Remove(dir.Path + "/"); err == nil {
-					ws.db.DeleteDir(dir.Path)
+					ws.db.Delete(dir.Path)
 					removed++
 				} else {
 					log.Printf("Clean: Failed to delete empty dir %s: %v", dir.Path, err)
@@ -86,13 +89,12 @@ func (ws *Sync) Clean(bucket string) error {
 // Sync performs a sync of WebDAV content to the database
 func (ws *Sync) Sync(bucket string) error {
 	start := time.Now()
+	prefix := bucket + "/"
 
 	// Ensure root directory entry exists
-	if entry, err := ws.db.Stat(bucket); err != nil || !entry.IsDir {
-		err := ws.db.InsertObjects(fs.EntryInfo{
-			Path:         bucket,
-			Bucket:       bucket,
-			Key:          "",
+	if entry, err := ws.db.Stat(prefix); err != nil || !entry.IsDir {
+		err := ws.db.Insert(fs.EntryInfo{
+			Path:         prefix,
 			Size:         0,
 			LastModified: time.Now().Unix(),
 			IsDir:        true,
@@ -104,7 +106,7 @@ func (ws *Sync) Sync(bucket string) error {
 		log.Printf("Sync: Created root directory entry for %s", bucket)
 	}
 
-	if processedCount, unprocessedCount, _, err := ws.db.GetStats(bucket); err != nil {
+	if processedCount, unprocessedCount, _, err := ws.db.GetStats(prefix); err != nil {
 		return err
 	} else if unprocessedCount == 0 {
 		log.Printf("Sync: No unprocessed entries for %s, skipping sync", bucket)
@@ -137,7 +139,7 @@ func (ws *Sync) Sync(bucket string) error {
 	pending := 0
 
 	for {
-		queue, err := ws.db.ListUnprocessedDirs(bucket, 50)
+		queue, err := ws.db.ListPendingDirs(prefix, 50)
 		if err != nil {
 			log.Printf("Sync: Failed to list unprocessed directories: %v", err)
 			break
@@ -170,13 +172,13 @@ func (ws *Sync) Sync(bucket string) error {
 	wg.Wait()
 	close(recv)
 
-	if deleted, err := ws.db.DeleteUnprocessed(bucket); err != nil {
+	if deleted, err := ws.db.DeleteDanglingFiles(prefix); err != nil {
 		log.Printf("Sync: Failed to delete old entries for bucket %s: %v", bucket, err)
 	} else if deleted > 0 {
 		log.Printf("Sync: Deleted %d old unprocessed entries for bucket %s", deleted, bucket)
 	}
 
-	if processedCount, _, totalSize, err := ws.db.GetStats(bucket); err == nil {
+	if processedCount, _, totalSize, err := ws.db.GetStats(prefix); err == nil {
 		log.Printf("Sync: Loaded %d objects (%.2f MB total) into database",
 			processedCount, float64(totalSize)/1024/1024)
 	}
@@ -194,7 +196,8 @@ func (ws *Sync) walkDir(path string) error {
 	// Read directory
 	infos, err := ws.client.ReadDir(path)
 	if fs.IsNotFound(err) {
-		return ws.db.SetProcessed(path, true)
+		_, err = ws.db.SetProcessed(path, false, true)
+		return err
 	} else if err != nil {
 		log.Printf("Sync: Failed to read directory %s: %v", path, err)
 		return err
@@ -205,17 +208,12 @@ func (ws *Sync) walkDir(path string) error {
 	for _, info := range infos {
 		fullPath := filepath.Join(path, info.Name())
 		fullPath = strings.ReplaceAll(fullPath, "\\", "/")
-
-		bucket, key, ok := fs.BucketAndKeyFromPath(fullPath)
-		if !ok {
-			log.Printf("Sync: Failed to parse path %s", fullPath)
-			continue
+		if info.IsDir() {
+			fullPath += "/"
 		}
 
 		fileInfo := fs.EntryInfo{
 			Path:         fullPath,
-			Bucket:       bucket,
-			Key:          key,
 			Size:         info.Size(),
 			LastModified: info.ModTime().Unix(),
 			IsDir:        info.IsDir(),
@@ -224,12 +222,12 @@ func (ws *Sync) walkDir(path string) error {
 		batchInfos = append(batchInfos, fileInfo)
 	}
 
-	err = ws.db.InsertObjects(batchInfos...)
+	err = ws.db.Insert(batchInfos...)
 	if err != nil {
 		return err
 	}
 
-	err = ws.db.SetProcessed(path, true)
+	_, err = ws.db.SetProcessed(path, false, true)
 	if err != nil {
 		return err
 	}

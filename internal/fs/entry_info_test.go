@@ -18,11 +18,11 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 	}{
 		{
 			name:       "root path",
-			path:       "/",
+			path:       "",
 			wantBucket: "",
 			wantKey:    "",
 			wantOk:     false,
-			wantPath:   "/",
+			wantPath:   "",
 		},
 		{
 			name:       "empty path",
@@ -30,11 +30,11 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "",
 			wantKey:    "",
 			wantOk:     false,
-			wantPath:   "/",
+			wantPath:   "",
 		},
 		{
 			name:       "bucket only",
-			path:       "/mybucket",
+			path:       "mybucket",
 			wantBucket: "mybucket",
 			wantKey:    "",
 			wantOk:     true,
@@ -42,7 +42,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 		},
 		{
 			name:       "bucket with trailing slash",
-			path:       "/mybucket/",
+			path:       "mybucket/",
 			wantBucket: "mybucket",
 			wantKey:    "",
 			wantOk:     true,
@@ -50,7 +50,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 		},
 		{
 			name:       "bucket with key",
-			path:       "/mybucket/mykey",
+			path:       "mybucket/mykey",
 			wantBucket: "mybucket",
 			wantKey:    "mykey",
 			wantOk:     true,
@@ -58,7 +58,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 		},
 		{
 			name:       "bucket with nested key",
-			path:       "/mybucket/folder/file.txt",
+			path:       "mybucket/folder/file.txt",
 			wantBucket: "mybucket",
 			wantKey:    "folder/file.txt",
 			wantOk:     true,
@@ -66,7 +66,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 		},
 		{
 			name:       "bucket with deeply nested key",
-			path:       "/mybucket/folder1/folder2/folder3/file.txt",
+			path:       "mybucket/folder1/folder2/folder3/file.txt",
 			wantBucket: "mybucket",
 			wantKey:    "folder1/folder2/folder3/file.txt",
 			wantOk:     true,
@@ -128,22 +128,20 @@ func TestBaseDirEntries(t *testing.T) {
 	}{
 		{
 			name: "root path",
-			path: "/",
+			path: "",
 			want: []EntryInfo{},
 		},
 		{
 			name: "bucket path",
-			path: "/mybucket",
+			path: "mybucket",
 			want: []EntryInfo{},
 		},
 		{
 			name: "file in bucket",
-			path: "/mybucket/file.txt",
+			path: "mybucket/file.txt",
 			want: []EntryInfo{
 				{
-					Path:         "/mybucket",
-					Bucket:       "mybucket",
-					Key:          "",
+					Path:         "mybucket/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
@@ -153,21 +151,17 @@ func TestBaseDirEntries(t *testing.T) {
 		},
 		{
 			name: "nested file",
-			path: "/mybucket/folder/file.txt",
+			path: "mybucket/folder/file.txt",
 			want: []EntryInfo{
 				{
-					Path:         "/mybucket/folder",
-					Bucket:       "mybucket",
-					Key:          "folder",
+					Path:         "mybucket/folder/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
 					Processed:    true,
 				},
 				{
-					Path:         "/mybucket",
-					Bucket:       "mybucket",
-					Key:          "",
+					Path:         "mybucket/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
@@ -177,39 +171,31 @@ func TestBaseDirEntries(t *testing.T) {
 		},
 		{
 			name: "deeply nested file",
-			path: "/mybucket/folder1/folder2/folder3/file.txt",
+			path: "mybucket/folder1/folder2/folder3/file.txt",
 			want: []EntryInfo{
 				{
-					Path:         "/mybucket/folder1/folder2/folder3",
-					Bucket:       "mybucket",
-					Key:          "folder1/folder2/folder3",
+					Path:         "mybucket/folder1/folder2/folder3/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
 					Processed:    true,
 				},
 				{
-					Path:         "/mybucket/folder1/folder2",
-					Bucket:       "mybucket",
-					Key:          "folder1/folder2",
+					Path:         "mybucket/folder1/folder2/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
 					Processed:    true,
 				},
 				{
-					Path:         "/mybucket/folder1",
-					Bucket:       "mybucket",
-					Key:          "folder1",
+					Path:         "mybucket/folder1/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
 					Processed:    true,
 				},
 				{
-					Path:         "/mybucket",
-					Bucket:       "mybucket",
-					Key:          "",
+					Path:         "mybucket/",
 					Size:         0,
 					LastModified: 0,
 					IsDir:        true,
@@ -226,8 +212,6 @@ func TestBaseDirEntries(t *testing.T) {
 			for i, entry := range got {
 				want := tt.want[i]
 				assert.Equal(t, want.Path, entry.Path)
-				assert.Equal(t, want.Bucket, entry.Bucket)
-				assert.Equal(t, want.Key, entry.Key)
 				assert.Equal(t, want.Size, entry.Size)
 				assert.Equal(t, want.LastModified, entry.LastModified)
 				assert.Equal(t, want.IsDir, entry.IsDir)

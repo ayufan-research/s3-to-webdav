@@ -6,16 +6,17 @@ import (
 
 type Cache interface {
 	Close() error
-	InsertObjects(objects ...fs.EntryInfo) error
-	ListObjects(bucket, prefix, marker string, dirOnly bool, limit int) ([]fs.EntryInfo, bool, error)
-	ListUnprocessedDirs(bucket string, limit int) ([]fs.EntryInfo, error)
-	ListEmptyDirs(bucket string, limit int) ([]fs.EntryInfo, error)
+	Optimise() error
+
+	Insert(objects ...fs.EntryInfo) error
+	List(prefix, marker string, dirOnly bool, limit int) ([]fs.EntryInfo, bool, error)
 	Stat(path string) (fs.EntryInfo, error)
-	StatObject(bucket, key string) (fs.EntryInfo, error)
-	GetStats(bucket string) (processed int, unprocessed int, totalSize int64, err error)
-	DeleteObject(bucket, key string) (int64, error)
-	DeleteDir(path string) (int64, error)
-	DeleteUnprocessed(bucket string) (int64, error)
-	SetProcessed(path string, processed bool) error
-	ResetProcessedFlags(bucket string) error
+	Delete(path string) error
+
+	GetStats(prefix string) (processed int, unprocessed int, totalSize int64, err error)
+
+	ListPendingDirs(prefix string, limit int) ([]fs.EntryInfo, error)
+	ListDanglingDirs(prefix string, limit int) ([]fs.EntryInfo, error)
+	DeleteDanglingFiles(prefix string) (int64, error)
+	SetProcessed(prefix string, recursive, processed bool) (int64, error)
 }

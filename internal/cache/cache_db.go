@@ -3,6 +3,7 @@ package cache
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +55,8 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	PRAGMA temp_store = memory;
 	PRAGMA mmap_size = 268435456;
 	PRAGMA foreign_keys = ON;
+	PRAGMA case_sensitive_like = ON;
+	PRAGMA optimize;
 	`
 	if _, err := db.Exec(pragmas); err != nil {
 		return nil, fmt.Errorf("failed to set pragmas: %v", err)
@@ -65,8 +68,6 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	CREATE TABLE IF NOT EXISTS entries (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		path TEXT NOT NULL UNIQUE,
-		bucket TEXT NOT NULL,
-		key TEXT NOT NULL,
 		size INTEGER NOT NULL,
 		last_modified INTEGER NOT NULL,
 		is_dir INTEGER NOT NULL,
@@ -75,10 +76,8 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	);
 
 	-- Indexes for performance
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_path ON entries(path);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_bucket_key ON entries(bucket, key);
-	CREATE INDEX IF NOT EXISTS idx_entries_bucket_processed_isdir ON entries(bucket, processed, is_dir, path);
-	CREATE INDEX IF NOT EXISTS idx_entries_bucket_dirname ON entries (bucket, rtrim(path, replace(path, '/', '')));
+	CREATE INDEX IF NOT EXISTS idx_entries_path_dirname ON entries (rtrim(path, replace(path, '/', '')));
+	ANALYZE;
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -87,8 +86,13 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// InsertObjects inserts multiple objects in a single transaction
-func (c *cacheDB) InsertObjects(objects ...fs.EntryInfo) error {
+func (c *cacheDB) Optimise() error {
+	_, err := c.db.Exec("ANALYZE")
+	return err
+}
+
+// Insert inserts multiple objects in a single transaction
+func (c *cacheDB) Insert(objects ...fs.EntryInfo) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -103,10 +107,10 @@ func (c *cacheDB) InsertObjects(objects ...fs.EntryInfo) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO entries (path, bucket, key, size, last_modified, is_dir, updated_at, processed)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO entries (path, size, last_modified, is_dir, updated_at, processed)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO UPDATE SET
-			bucket = excluded.bucket, key = excluded.key, size = excluded.size,
+			size = excluded.size,
 			is_dir = excluded.is_dir, updated_at = excluded.updated_at,
 			last_modified = MAX(excluded.last_modified, last_modified),
 			processed = MAX(excluded.processed, processed)
@@ -119,7 +123,20 @@ func (c *cacheDB) InsertObjects(objects ...fs.EntryInfo) error {
 	now := time.Now().Unix()
 
 	for _, obj := range objects {
-		_, err := stmt.Exec(obj.Path, obj.Bucket, obj.Key, obj.Size,
+		if strings.HasPrefix(obj.Path, "/") {
+			return fmt.Errorf("object path cannot start with '/': %s", obj.Path)
+		}
+		if obj.IsDir {
+			if !strings.HasSuffix(obj.Path, "/") {
+				return fmt.Errorf("directory path must end with '/': %s", obj.Path)
+			}
+		} else {
+			if strings.HasSuffix(obj.Path, "/") {
+				return fmt.Errorf("file path cannot end with '/': %s", obj.Path)
+			}
+		}
+
+		_, err := stmt.Exec(obj.Path, obj.Size,
 			obj.LastModified, obj.IsDir, now, obj.Processed)
 		if err != nil {
 			return fmt.Errorf("failed to insert object %s: %v", obj.Path, err)
@@ -130,18 +147,16 @@ func (c *cacheDB) InsertObjects(objects ...fs.EntryInfo) error {
 }
 
 func (c *cacheDB) scanEntry(scanner func(dest ...any) error) (fs.EntryInfo, error) {
-	var path, bucket, key string
+	var path string
 	var size, lastModified int64
 	var isDir, processed int
 
-	if err := scanner(&path, &bucket, &key, &size, &lastModified, &isDir, &processed); err != nil {
+	if err := scanner(&path, &size, &lastModified, &isDir, &processed); err != nil {
 		return fs.EntryInfo{}, fmt.Errorf("failed to scan row: %v", err)
 	}
 
 	return fs.EntryInfo{
 		Path:         path,
-		Bucket:       bucket,
-		Key:          key,
 		Size:         size,
 		LastModified: lastModified,
 		IsDir:        isDir == 1,
@@ -154,7 +169,7 @@ func (c *cacheDB) findObject(where string, args ...any) (fs.EntryInfo, error) {
 	defer c.mu.RUnlock()
 
 	row := c.db.QueryRow(`
-		SELECT path, bucket, key, size, last_modified, is_dir, processed
+		SELECT path, size, last_modified, is_dir, processed
 		FROM entries WHERE `+where, args...)
 	return c.scanEntry(row.Scan)
 }
@@ -164,7 +179,7 @@ func (c *cacheDB) findObjects(where string, args ...any) ([]fs.EntryInfo, error)
 	defer c.mu.RUnlock()
 
 	rows, err := c.db.Query(`
-		SELECT path, bucket, key, size, last_modified, is_dir, processed
+		SELECT path, size, last_modified, is_dir, processed
 		FROM entries WHERE `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query objects: %v", err)
@@ -184,25 +199,36 @@ func (c *cacheDB) findObjects(where string, args ...any) ([]fs.EntryInfo, error)
 	return entries, nil
 }
 
-// ListObjects retrieves objects from a bucket with optional prefix and marker
+// List retrieves objects from a bucket with optional prefix and marker
 // Returns objects up to the specified limit, ordered by path
 // Also returns whether results were truncated
-func (c *cacheDB) ListObjects(bucket, prefix, marker string, dirOnly bool, limit int) ([]fs.EntryInfo, bool, error) {
-	// Base query
-	query := "bucket = ?"
-	args := []interface{}{bucket}
-
-	if prefix != "" {
-		query += " AND key LIKE ?"
-		args = append(args, prefix+"%")
+func (c *cacheDB) List(prefix, marker string, dirOnly bool, limit int) ([]fs.EntryInfo, bool, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return nil, false, fmt.Errorf("prefix cannot start with '/': %s", prefix)
 	}
+	if !strings.HasSuffix(prefix, "/") && prefix != "" {
+		return nil, false, fmt.Errorf("prefix must end with '/' if not empty: %s", prefix)
+	}
+	if strings.HasPrefix(marker, "/") {
+		return nil, false, fmt.Errorf("marker cannot start with '/': %s", marker)
+	}
+
+	// Base query
+	query := "1=1"
+	args := []interface{}{}
+
 	if marker != "" {
-		query += " AND key > ?"
+		query += " AND path > ?"
 		args = append(args, marker)
 	}
 
+	if prefix != "" {
+		query += " AND path > ? AND path < ?"
+		args = append(args, prefix, prefix+"\xFF")
+	}
+
 	if dirOnly {
-		query += " AND key NOT LIKE ? AND key <> ''"
+		query += " AND rtrim(path, '/') NOT LIKE ?"
 		args = append(args, prefix+"%/%")
 	} else {
 		query += " AND is_dir = 0"
@@ -227,39 +253,12 @@ func (c *cacheDB) ListObjects(bucket, prefix, marker string, dirOnly bool, limit
 	return files, truncated, nil
 }
 
-// ListUnprocessedDirs returns a list of unprocessed directory entries up to the specified limit
-func (c *cacheDB) ListUnprocessedDirs(bucket string, limit int) ([]fs.EntryInfo, error) {
-	return c.findObjects("bucket = ? AND processed = 0 AND is_dir = 1 ORDER BY path LIMIT ?", bucket, limit)
-}
-
-func (c *cacheDB) ListEmptyDirs(bucket string, limit int) ([]fs.EntryInfo, error) {
-	return c.findObjects(`bucket = ? AND processed = 1 AND is_dir=1 AND key != '' AND path || '/' NOT IN (
-		SELECT DISTINCT rtrim(path, replace(path, '/', ''))
-		FROM entries WHERE bucket = ?
-	) ORDER BY path DESC LIMIT ?`, bucket, bucket, limit)
-}
-
 // Stat checks if an object exists and returns its metadata
 func (c *cacheDB) Stat(path string) (fs.EntryInfo, error) {
-	return c.findObject("path = ?", path)
-}
-
-// StatObject checks if an object exists and returns its metadata
-func (c *cacheDB) StatObject(bucket, key string) (fs.EntryInfo, error) {
-	return c.findObject("bucket = ? AND key = ?", bucket, key)
-}
-
-// GetStats returns the number of processed and unprocessed entries
-func (c *cacheDB) GetStats(bucket string) (processed int, unprocessed int, totalSize int64, err error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	err = c.db.QueryRow("SELECT SUM(processed==1), SUM(processed==0), SUM(size) FROM entries WHERE bucket = ?",
-		bucket).Scan(&processed, &unprocessed, &totalSize)
-	if err != nil {
-		return 0, 0, 0, err
+	if strings.HasPrefix(path, "/") {
+		return fs.EntryInfo{}, fmt.Errorf("object path cannot start with '/': %s", path)
 	}
-	return processed, unprocessed, totalSize, err
+	return c.findObject("path = ?", path)
 }
 
 func (c *cacheDB) execSql(query string, args ...any) (int64, error) {
@@ -275,24 +274,117 @@ func (c *cacheDB) execSql(query string, args ...any) (int64, error) {
 	return rowsAffected, err
 }
 
-func (c *cacheDB) DeleteObject(bucket, key string) (int64, error) {
-	return c.execSql("DELETE FROM entries WHERE bucket = ? AND key = ?", bucket, key)
+func (c *cacheDB) Delete(path string) error {
+	if strings.HasPrefix(path, "/") {
+		return fmt.Errorf("object path cannot start with '/': %s", path)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tx, err := c.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	query := "DELETE FROM entries WHERE 1=1"
+	args := []any{}
+
+	if strings.HasSuffix(path, "/") {
+		query += " AND path LIKE ?"
+		args = append(args, path+"%")
+	} else {
+		query += " AND path = ?"
+		args = append(args, path)
+	}
+
+	result, err := tx.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete entry: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		return nil
+		// return fmt.Errorf("no entry found for path: %s", path)
+	}
+	if rowsAffected > 1 {
+		return fmt.Errorf("multiple entries deleted for path: %s", path)
+	}
+
+	return tx.Commit()
 }
 
-func (c *cacheDB) DeleteDir(path string) (int64, error) {
-	return c.execSql("DELETE FROM entries WHERE path = ? OR path LIKE ? || '/%'", path, path)
+// GetStats returns the number of processed and pending entries
+func (c *cacheDB) GetStats(prefix string) (processed int, pending int, totalSize int64, err error) {
+	if strings.HasPrefix(prefix, "/") {
+		return 0, 0, 0, fmt.Errorf("object path cannot start with '/': %s", prefix)
+	}
+	if !strings.HasSuffix(prefix, "/") {
+		return 0, 0, 0, fmt.Errorf("prefix must end with '/': %s", prefix)
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	err = c.db.QueryRow(`SELECT
+		COALESCE(SUM(processed==1), 0),
+		COALESCE(SUM(processed==0), 0),
+		COALESCE(SUM(size), 0)
+		FROM entries WHERE path LIKE ?`,
+		prefix+"%").Scan(&processed, &pending, &totalSize)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return processed, pending, totalSize, err
 }
 
-func (c *cacheDB) DeleteUnprocessed(bucket string) (int64, error) {
-	return c.execSql("DELETE FROM entries WHERE bucket = ? AND processed = 0", bucket)
+func (c *cacheDB) ListPendingDirs(prefix string, limit int) ([]fs.EntryInfo, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return nil, fmt.Errorf("prefix cannot start with '/': %s", prefix)
+	}
+	if !strings.HasSuffix(prefix, "/") {
+		return nil, fmt.Errorf("prefix must end with '/': %s", prefix)
+	}
+
+	return c.findObjects("path LIKE ? AND processed = 0 AND is_dir = 1 ORDER BY path LIMIT ?", prefix+"%", limit)
 }
 
-func (c *cacheDB) SetProcessed(path string, processed bool) error {
-	_, err := c.execSql("UPDATE entries SET processed = ?, updated_at = ? WHERE path = ?", processed, time.Now().Unix(), path)
-	return err
+func (c *cacheDB) ListDanglingDirs(prefix string, limit int) ([]fs.EntryInfo, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return nil, fmt.Errorf("prefix cannot start with '/': %s", prefix)
+	}
+	if !strings.HasSuffix(prefix, "/") {
+		return nil, fmt.Errorf("prefix must end with '/': %s", prefix)
+	}
+
+	return c.findObjects(`path LIKE ? AND processed = 1 AND is_dir=1 AND path || '/' NOT IN (
+		SELECT DISTINCT rtrim(path, replace(path, '/', ''))
+		FROM entries WHERE path LIKE ?
+	) ORDER BY path DESC LIMIT ?`, prefix+"%", prefix+"%", limit)
 }
 
-func (c *cacheDB) ResetProcessedFlags(bucket string) error {
-	_, err := c.execSql("UPDATE entries SET processed = 0 WHERE bucket = ?", bucket)
-	return err
+func (c *cacheDB) DeleteDanglingFiles(prefix string) (int64, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return 0, fmt.Errorf("prefix cannot start with '/': %s", prefix)
+	}
+	if !strings.HasSuffix(prefix, "/") {
+		return 0, fmt.Errorf("prefix must end with '/': %s", prefix)
+	}
+	return c.execSql("DELETE FROM entries WHERE path LIKE ? AND is_dir = 0 AND processed = 0", prefix+"%")
+}
+
+func (c *cacheDB) SetProcessed(prefix string, recursive, processed bool) (int64, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return 0, fmt.Errorf("prefix cannot start with '/': %s", prefix)
+	}
+
+	if strings.HasSuffix(prefix, "/") && recursive {
+		return c.execSql("UPDATE entries SET processed = ? WHERE processed <> ? AND path LIKE ?", processed, processed, prefix+"%")
+	}
+	return c.execSql("UPDATE entries SET processed = ? WHERE processed <> ? AND path = ?", processed, processed, prefix)
 }
