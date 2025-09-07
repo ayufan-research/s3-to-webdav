@@ -241,7 +241,7 @@ func (ws *Sync) printStats(bucket string) {
 	}
 	ws.lastStatus = time.Now()
 
-	processedCount, unprocessedCount, totalSize, err := ws.db.GetStats(bucket)
+	processedCount, unprocessedCount, totalSize, err := ws.db.GetStats(bucket + "/")
 	if err != nil {
 		return
 	}
