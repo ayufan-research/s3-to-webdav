@@ -38,7 +38,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "mybucket",
 			wantKey:    "",
 			wantOk:     true,
-			wantPath:   "/mybucket",
+			wantPath:   "mybucket",
 		},
 		{
 			name:       "bucket with trailing slash",
@@ -46,7 +46,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "mybucket",
 			wantKey:    "",
 			wantOk:     true,
-			wantPath:   "/mybucket",
+			wantPath:   "mybucket",
 		},
 		{
 			name:       "bucket with key",
@@ -54,7 +54,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "mybucket",
 			wantKey:    "mykey",
 			wantOk:     true,
-			wantPath:   "/mybucket/mykey",
+			wantPath:   "mybucket/mykey",
 		},
 		{
 			name:       "bucket with nested key",
@@ -62,7 +62,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "mybucket",
 			wantKey:    "folder/file.txt",
 			wantOk:     true,
-			wantPath:   "/mybucket/folder/file.txt",
+			wantPath:   "mybucket/folder/file.txt",
 		},
 		{
 			name:       "bucket with deeply nested key",
@@ -70,7 +70,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "mybucket",
 			wantKey:    "folder1/folder2/folder3/file.txt",
 			wantOk:     true,
-			wantPath:   "/mybucket/folder1/folder2/folder3/file.txt",
+			wantPath:   "mybucket/folder1/folder2/folder3/file.txt",
 		},
 		{
 			name:       "no leading slash",
@@ -78,7 +78,7 @@ func TestBucketAndKeyFromPathAndPathFromBucketAndKey(t *testing.T) {
 			wantBucket: "mybucket",
 			wantKey:    "mykey",
 			wantOk:     true,
-			wantPath:   "/mybucket/mykey",
+			wantPath:   "mybucket/mykey",
 		},
 	}
 
@@ -108,7 +108,7 @@ func TestPathFromBucketAndKeyEdgeCases(t *testing.T) {
 			name:   "empty bucket with key",
 			bucket: "",
 			key:    "somekey",
-			want:   "/",
+			want:   "",
 		},
 	}
 
