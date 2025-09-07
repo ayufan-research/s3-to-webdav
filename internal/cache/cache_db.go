@@ -154,7 +154,7 @@ func (c *cacheDB) findObject(where string, args ...any) (fs.EntryInfo, error) {
 	defer c.mu.RUnlock()
 
 	row := c.db.QueryRow(`
-		SELECT path, bucket, key, size, last_modified, is_dir, processed 
+		SELECT path, bucket, key, size, last_modified, is_dir, processed
 		FROM entries WHERE `+where, args...)
 	return c.scanEntry(row.Scan)
 }
@@ -164,7 +164,7 @@ func (c *cacheDB) findObjects(where string, args ...any) ([]fs.EntryInfo, error)
 	defer c.mu.RUnlock()
 
 	rows, err := c.db.Query(`
-		SELECT path, bucket, key, size, last_modified, is_dir, processed 
+		SELECT path, bucket, key, size, last_modified, is_dir, processed
 		FROM entries WHERE `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query objects: %v", err)
